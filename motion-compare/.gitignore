@@ -1,0 +1,9 @@
+# build/run scratch
+/out/
+*.yuv
+*.o
+/src/nvof_extract
+__pycache__/
+
+# local ssh known-hosts for this repo's remote (kept in .git/ anyway)
+.git-known-hosts

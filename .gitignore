@@ -1,9 +1,15 @@
-# build/run scratch
-/out/
-*.yuv
-*.o
-/src/nvof_extract
-__pycache__/
+# --- NVIDIA DeepStream 8 SDK source tree -------------------------------------
+# Proprietary (SPDX: LicenseRef-NvidiaProprietary), never released as open
+# source by NVIDIA. Kept here only as a local build/reference copy — re-pull
+# from an NGC container or the SDK installer when needed. NOT tracked.
+/sources/
+/service-maker/
+/LICENSE.txt
+/README
+/version
 
-# local ssh known-hosts for this repo's remote (kept in .git/ anyway)
-.git-known-hosts
+# --- general scratch --------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
