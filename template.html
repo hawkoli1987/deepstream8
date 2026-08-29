@@ -1,0 +1,673 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Four Ways to See Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+
+<style>
+  :root{
+    --bg:#0F1113; --panel:#16191E; --panel-2:#1D222A; --edge:#2B323B;
+    --ink:#E4E6E3; --dim:#868E98; --faint:#545C66;
+    --static:#E24A4F; --motion:#2FD08A;
+    --cpu:#F0B34A; --gpu:#57A0F4; --nvof:#BE7BF0; --mog:#24C1C1;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --col: 640px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    padding:40px 20px 96px;
+  }
+  .wrap{max-width:var(--col); margin:0 auto}
+
+  /* ---- header ---- */
+  .status{
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--dim);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding-bottom:18px; border-bottom:1px solid var(--edge);
+  }
+  .rec{width:7px;height:7px;border-radius:50%;background:var(--static);
+    box-shadow:0 0 0 0 rgba(226,74,79,.5); animation:pulse 2.4s ease-out infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(226,74,79,.45)}70%{box-shadow:0 0 0 7px rgba(226,74,79,0)}100%{box-shadow:0 0 0 0 rgba(226,74,79,0)}}
+  @media (prefers-reduced-motion:reduce){ .rec{animation:none} }
+  .status .sep{color:var(--faint)}
+
+  h1{
+    font-family:var(--mono); font-weight:600; font-size:30px; line-height:1.15;
+    letter-spacing:-.01em; text-wrap:balance;
+    margin:26px 0 12px;
+  }
+  .dek{color:var(--dim); font-size:14.5px; max-width:58ch}
+  .dek b{color:var(--ink); font-weight:500}
+
+  .parity{
+    margin:22px 0 4px; padding:12px 14px;
+    background:var(--panel); border:1px solid var(--edge); border-radius:3px;
+    display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+    font-family:var(--mono); font-size:12.5px;
+  }
+  .parity .k{color:var(--dim); letter-spacing:.04em}
+  .parity .v{color:var(--motion)}
+  .parity .n{color:var(--ink)}
+
+  /* ---- instrument ---- */
+  .deck{position:relative; margin-top:30px}
+
+  .stage{
+    position:relative; width:100%; background:#000;
+    border:1px solid var(--edge); border-radius:3px; overflow:hidden;
+    line-height:0; cursor:pointer;
+  }
+  .stage video{width:100%; height:auto; display:block}
+  .stage canvas{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+  .stage .hint{
+    position:absolute; left:10px; bottom:9px; font-family:var(--mono);
+    font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+    color:rgba(228,230,227,.55); pointer-events:none;
+    opacity:1; transition:opacity .3s;
+  }
+  .stage.touched .hint, .stage.loading .hint{opacity:0}
+  .stage .loadmsg{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--dim); background:#000;
+  }
+  .stage.loading .loadmsg{display:flex}
+  .stage.loading{cursor:progress}
+  .stage .loadmsg::after{
+    content:""; width:26px; height:26px; margin-left:12px; border-radius:50%;
+    border:2px solid var(--edge); border-top-color:var(--motion);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .stage .loadmsg::after{animation:none; border-top-color:var(--edge)} }
+
+  .ovbar{
+    display:flex; gap:6px; margin:10px 0 4px; flex-wrap:wrap;
+  }
+  .ovbar button{
+    font-family:var(--mono); font-size:11px; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--dim);
+    background:var(--panel); border:1px solid var(--edge); border-radius:3px;
+    padding:6px 10px; cursor:pointer; transition:color .15s,border-color .15s,background .15s;
+    display:flex; align-items:center; gap:7px;
+  }
+  .ovbar button .dot{width:8px;height:8px;border-radius:2px;background:currentColor;opacity:.55}
+  .ovbar button[data-k="cpu"]{--c:var(--cpu)} .ovbar button[data-k="gpu"]{--c:var(--gpu)}
+  .ovbar button[data-k="nvof"]{--c:var(--nvof)} .ovbar button[data-k="mog2"]{--c:var(--mog)}
+  .ovbar button:hover{color:var(--ink); border-color:var(--faint)}
+  .ovbar button[aria-pressed="true"]{color:var(--ink); border-color:var(--c,var(--faint)); background:var(--panel-2)}
+  .ovbar button[aria-pressed="true"] .dot{background:var(--c,var(--ink)); opacity:1; box-shadow:0 0 8px var(--c)}
+  .ovbar button:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+
+  /* one scrubber */
+  .scrub{
+    position:relative; height:26px; margin:4px 0 2px; cursor:ew-resize;
+    touch-action:none;
+  }
+  .scrub .rail{
+    position:absolute; left:0; right:0; top:11px; height:3px;
+    background:var(--edge); border-radius:2px;
+  }
+  .scrub .fill{position:absolute; left:0; top:11px; height:3px; background:var(--faint); border-radius:2px}
+  .scrub .tick{
+    position:absolute; top:6px; width:2px; height:13px; margin-left:-1px;
+    background:var(--motion); border-radius:1px; box-shadow:0 0 6px rgba(47,208,138,.7);
+  }
+  .scrub:focus-visible{outline:2px solid var(--ink); outline-offset:3px; border-radius:3px}
+
+  /* tracks */
+  .tracks{cursor:ew-resize; touch-action:none}
+  .track{
+    border:1px solid var(--edge); border-top:none; background:var(--panel);
+    padding:9px 0 0;
+  }
+  .track:first-child{border-top:1px solid var(--edge); border-radius:3px 3px 0 0}
+  .track:last-child{border-radius:0 0 3px 3px}
+  .track .head{
+    display:flex; align-items:baseline; gap:10px; padding:0 12px 7px;
+    font-family:var(--mono); font-size:11px;
+  }
+  .track .name{color:var(--ink); letter-spacing:.02em; font-weight:500}
+  .track .dev{color:var(--faint); font-size:10px; letter-spacing:.05em; text-transform:uppercase}
+  .track .thr{margin-left:auto; color:var(--dim)}
+  .track .thr b{color:var(--c); font-weight:500}
+  .track .now{color:var(--dim)}
+  .track .now b{font-weight:500}
+  .track[data-k="cpu"]{--c:var(--cpu)} .track[data-k="gpu"]{--c:var(--gpu)}
+  .track[data-k="nvof"]{--c:var(--nvof)} .track[data-k="mog2"]{--c:var(--mog)}
+
+  .track .plot{display:block; width:100%; height:46px}
+  .track .swim{display:block; width:100%; height:12px; margin-top:2px}
+
+  .legend{
+    display:flex; gap:16px; margin:12px 2px 0; font-family:var(--mono);
+    font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim);
+    flex-wrap:wrap;
+  }
+  .legend span{display:flex; align-items:center; gap:6px}
+  .legend i{width:10px; height:10px; border-radius:2px; display:inline-block}
+  .legend .mo{background:var(--motion)} .legend .st{background:var(--static)}
+  .legend .nd{background:var(--faint)}
+
+  .keys{
+    margin-top:10px; font-family:var(--mono); font-size:10.5px; color:var(--faint);
+    letter-spacing:.05em;
+  }
+  .keys kbd{
+    font:inherit; color:var(--dim); background:var(--panel-2);
+    border:1px solid var(--edge); border-radius:3px; padding:1px 5px; margin:0 2px;
+  }
+
+  /* playhead scanline across deck */
+  .playhead{
+    position:absolute; top:0; bottom:0; width:1px; margin-left:-.5px;
+    background:var(--motion); pointer-events:none; z-index:6;
+    box-shadow:0 0 7px rgba(47,208,138,.55);
+  }
+  .playhead::after{
+    content:""; position:absolute; top:0; left:-3px; width:7px; height:7px;
+    background:var(--motion); clip-path:polygon(50% 100%,0 0,100% 0);
+  }
+
+  /* ---- readout ---- */
+  .readout{
+    margin-top:26px; border:1px solid var(--edge); border-radius:3px;
+    background:var(--panel); font-family:var(--mono); font-size:12px;
+  }
+  .readout .r-top{
+    display:flex; gap:16px; align-items:baseline; padding:11px 14px;
+    border-bottom:1px solid var(--edge); color:var(--dim); flex-wrap:wrap;
+  }
+  .readout .r-top b{color:var(--ink); font-weight:600; font-size:13px}
+  .readout .grid{display:grid; grid-template-columns:1fr 1fr; }
+  .readout .cell{
+    display:flex; align-items:baseline; gap:10px; padding:9px 14px;
+    border-bottom:1px solid var(--edge);
+  }
+  .readout .cell:nth-child(odd){border-right:1px solid var(--edge)}
+  .readout .cell:nth-last-child(-n+2){border-bottom:none}
+  .readout .cl{color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em; width:64px}
+  .readout .cv{color:var(--ink); font-variant-numeric:tabular-nums}
+  .readout .st{margin-left:auto; font-size:10px; letter-spacing:.08em; padding:2px 7px; border-radius:2px}
+  .readout .st.mo{color:var(--motion); background:rgba(47,208,138,.12)}
+  .readout .st.st{color:var(--static); background:rgba(226,74,79,.12)}
+  .readout .st.nd{color:var(--faint); background:rgba(84,92,102,.14)}
+
+  /* ---- notes ---- */
+  .notes{margin-top:40px; border-top:1px solid var(--edge); padding-top:24px}
+  .notes h2{
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--dim); margin-bottom:14px;
+  }
+  .notes h3{font-family:var(--mono); font-size:13px; color:var(--ink); margin:18px 0 5px; font-weight:500}
+  .notes p{color:var(--dim); font-size:13px; max-width:64ch; margin-bottom:8px}
+  .notes code{font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--panel-2); padding:1px 5px; border-radius:3px}
+  .notes .four{
+    display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:14px 0 6px;
+  }
+  .notes .four div{
+    border:1px solid var(--edge); border-left-width:2px; border-radius:3px;
+    padding:10px 12px; font-size:12.5px; color:var(--dim);
+  }
+  .notes .four b{font-family:var(--mono); font-size:11.5px; color:var(--ink); display:block; margin-bottom:3px; letter-spacing:.02em}
+  .notes .four .c-cpu{border-left-color:var(--cpu)} .notes .four .c-gpu{border-left-color:var(--gpu)}
+  .notes .four .c-nvof{border-left-color:var(--nvof)} .notes .four .c-mog{border-left-color:var(--mog)}
+  footer{margin-top:36px; font-family:var(--mono); font-size:10.5px; color:var(--faint); letter-spacing:.05em; line-height:1.9}
+
+  @media (max-width:560px){
+    body{padding:28px 14px 72px}
+    h1{font-size:24px}
+    .readout .grid{grid-template-columns:1fr}
+    .readout .cell:nth-child(odd){border-right:none}
+    .notes .four{grid-template-columns:1fr}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="status">
+      <span class="rec"></span>
+      <span>sample_cam6</span><span class="sep">/</span>
+      <span>parking deck</span><span class="sep">/</span>
+      <span id="s-frames">80 frames</span><span class="sep">/</span>
+      <span>1472&times;1384 fisheye</span><span class="sep">/</span>
+      <span>Tesla T4</span>
+    </div>
+
+    <h1>Four ways to see motion</h1>
+    <p class="dek">
+      One fixed camera over a parking deck. Two vehicles cross the aisle; nothing else
+      moves. Four motion-detection algorithms score every frame &mdash; two of them the
+      <b>same greyscale frame-difference</b>, once on the CPU and once on the GPU; one the
+      NVIDIA hardware <b>Optical&nbsp;Flow Accelerator</b>; one <b>MOG2</b> background
+      subtraction. Scrub the clip and watch where they agree, and where they don't.
+    </p>
+
+    <div class="parity" id="parity"></div>
+  </header>
+
+  <section class="deck" id="deck" aria-label="Motion comparison instrument">
+    <div class="stage loading" id="stage">
+      <video id="vid" playsinline muted preload="auto"></video>
+      <canvas id="ov"></canvas>
+      <span class="hint">click or space to play</span>
+      <div class="loadmsg" id="loadmsg">decoding clip&hellip;</div>
+    </div>
+
+    <div class="ovbar" id="ovbar" role="group" aria-label="Overlay">
+      <button data-k="none" aria-pressed="true">Overlay off</button>
+      <button data-k="cpu" aria-pressed="false"><span class="dot"></span>CPU absdiff</button>
+      <button data-k="gpu" aria-pressed="false"><span class="dot"></span>GPU absdiff</button>
+      <button data-k="nvof" aria-pressed="false"><span class="dot"></span>NvOFA</button>
+      <button data-k="mog2" aria-pressed="false"><span class="dot"></span>MOG2</button>
+    </div>
+
+    <div class="scrub" id="scrub" tabindex="0" role="slider"
+         aria-label="Frame" aria-valuemin="0" aria-valuemax="79" aria-valuenow="0">
+      <div class="rail"></div><div class="fill" id="fill"></div><div class="tick" id="tick"></div>
+    </div>
+
+    <div class="tracks" id="tracks"></div>
+
+    <div class="legend">
+      <span><i class="mo"></i>motion</span>
+      <span><i class="st"></i>static</span>
+      <span><i class="nd"></i>no data</span>
+      <span style="color:var(--faint)">&mdash; dashed line = threshold</span>
+    </div>
+    <div class="keys">
+      <kbd>space</kbd> play / pause &nbsp; <kbd>&larr;</kbd><kbd>&rarr;</kbd> step frame &nbsp;
+      <kbd>home</kbd><kbd>end</kbd> ends &nbsp; drag anywhere on the timeline to scrub
+    </div>
+
+    <div class="playhead" id="playhead"></div>
+  </section>
+
+  <section class="readout" id="readout" aria-live="off">
+    <div class="r-top">
+      <span>frame <b id="r-frame">0</b> / <span id="r-fmax">80</span></span>
+      <span>t <b id="r-time">0.00</b>s</span>
+      <span>source frame <b id="r-src">0</b> / 120</span>
+    </div>
+    <div class="grid" id="r-grid"></div>
+  </section>
+
+  <section class="notes">
+    <h2>How the scores are built</h2>
+
+    <h3>One decode, four readers</h3>
+    <p>
+      <code>sample_cam6.mp4</code> ships with a broken three-frame cadence &mdash; every
+      third frame is a byte-duplicate of the one before it. It was de-duplicated to
+      <b id="n-frames">80</b> unique frames (from 120) before anything else ran. Every
+      algorithm then reads the identical luma plane of the identical frames, so any
+      difference between them is the algorithm, not the pipeline.
+    </p>
+
+    <h3>Normalisation &mdash; two stages</h3>
+    <p>
+      Each raw score is first made <b>resolution-independent</b>: absdiff and MOG2 are
+      per-pixel means and fractions already; the optical-flow magnitude is divided by the
+      frame diagonal, so the same real motion scores the same at any resolution. Then each
+      series is scaled to <code>[0,1]</code> by its own 1st&ndash;99th percentile range.
+      That second step is <b>clip-relative</b>: the shapes and the crossings are
+      comparable across the four algorithms, but a 0.8 here is not an absolute motion
+      level. CPU and GPU share one set of scaling constants so their traces stay
+      pixel-identical.
+    </p>
+
+    <h3>Thresholds</h3>
+    <p>
+      One threshold per algorithm, placed by <b>Otsu's method</b> on that algorithm's
+      normalised histogram &mdash; the standard way to split one distribution into two
+      classes. Each lands with strong separation (&eta; &gt; 0.8 for all four). A frame is
+      <b>motion</b> when its normalised score is at or above the line.
+    </p>
+
+    <h3>What the four are</h3>
+    <div class="four" id="n-four"></div>
+
+    <h3>The clip</h3>
+    <p>
+      A 360&deg; fisheye over a parking deck &mdash; parked cars around the rim, a transit
+      aisle through the middle. It is deliberately <b>not</b> de-warped: correcting the
+      lens first would be a fairer physical measurement but a less fair comparison, since
+      the algorithms would no longer see identical pixels. Motion magnitude therefore
+      varies with position in the frame. Scores are computed only inside the illuminated
+      disc; the dead corners are masked out.
+    </p>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function(){
+  "use strict";
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var V = D.video, G = D.grid, A = D.algorithms;
+  var F = V.frame_count, FPS = V.fps, GW = G.cols, GH = G.rows;
+  var ACC = {cpu_absdiff:"cpu",gpu_absdiff:"gpu",nvof:"nvof",mog2:"mog2"};
+  var HEX = getComputedStyle(document.documentElement);
+  var COL = {
+    cpu:HEX.getPropertyValue("--cpu").trim(), gpu:HEX.getPropertyValue("--gpu").trim(),
+    nvof:HEX.getPropertyValue("--nvof").trim(), mog2:HEX.getPropertyValue("--mog").trim(),
+    motion:HEX.getPropertyValue("--motion").trim(), static:HEX.getPropertyValue("--static").trim(),
+    edge:HEX.getPropertyValue("--edge").trim(), faint:HEX.getPropertyValue("--faint").trim(),
+    dim:HEX.getPropertyValue("--dim").trim()
+  };
+
+  // ---- decode heat grids ----
+  function b64bytes(s){
+    var bin = atob(s), n = bin.length, a = new Uint8Array(n);
+    for (var i=0;i<n;i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+  A.forEach(function(a){ a._heat = b64bytes(a.heat_b64); });
+
+  function hexToRgb(h){
+    h = h.replace("#","");
+    return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];
+  }
+
+  // ---- header: parity ----
+  var P = D.parity;
+  document.getElementById("parity").innerHTML =
+    '<span class="k">CPU absdiff</span><span class="n">&equiv;</span>'
+    + '<span class="k">GPU absdiff</span>'
+    + '<span class="v">&nbsp;&nbsp;difference images bit-identical</span>'
+    + '<span class="k">&Delta;max = ' + P.max_abs_delta_raw.toExponential(1).replace("e+0","e") + '</span>'
+    + '<span class="k">&middot; CPU ' + P.cpu_runtime_s.toFixed(2) + 's</span>'
+    + '<span class="k">GPU ' + P.gpu_runtime_s.toFixed(2) + 's ('
+    + P.gpu_runtime_s_excl_transfer.toFixed(2) + 's on-device)</span>';
+
+  document.getElementById("s-frames").textContent = F + " frames";
+  document.getElementById("n-frames").textContent = F;
+  document.getElementById("r-fmax").textContent = F;
+
+  // ---- notes: four cards ----
+  var BLURB = {
+    cpu_absdiff:["c-cpu","Greyscale absdiff &mdash; CPU","|Y<sub>t</sub> &minus; Y<sub>t&minus;1</sub>| averaged over the disc. The blunt instrument: every changed pixel counts equally, no model, no memory."],
+    gpu_absdiff:["c-gpu","Greyscale absdiff &mdash; GPU","The identical calculation in CuPy on the T4. Same integer maths, same reduction &mdash; here to show the two devices agree to the last bit, and what the data transfer costs."],
+    nvof:["c-nvof","NVIDIA Optical Flow Accelerator","Dedicated silicon estimates a motion vector for every 4&times;4 block. Mean vector length / frame diagonal. Rejects the static shimmer better than frame differencing."],
+    mog2:["c-mog","MOG2 background subtraction","A per-pixel Gaussian-mixture model of the background; the score is the foreground fraction. Reacts as soon as an object arrives, and holds it &mdash; shadows excluded."]
+  };
+  var nf = document.getElementById("n-four");
+  A.forEach(function(a){
+    var b = BLURB[a.id]; var d = document.createElement("div");
+    d.className = b[0];
+    d.innerHTML = "<b>"+b[1]+"</b>"+b[2];
+    nf.appendChild(d);
+  });
+
+  // ---- build tracks ----
+  var tracksEl = document.getElementById("tracks");
+  var rGrid = document.getElementById("r-grid");
+  var SVGNS = "http://www.w3.org/2000/svg";
+
+  function el(tag, attrs){
+    var e = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  var trackRefs = [];
+  A.forEach(function(a){
+    var k = ACC[a.id];
+    var wrap = document.createElement("div");
+    wrap.className = "track"; wrap.setAttribute("data-k", k);
+
+    var thr = a.threshold;
+    wrap.innerHTML =
+      '<div class="head">'
+      + '<span class="name">'+a.label+'</span>'
+      + '<span class="dev">'+a.device+'</span>'
+      + '<span class="now" data-now></span>'
+      + '<span class="thr">thr <b>'+thr.toFixed(2)+'</b></span>'
+      + '</div>';
+
+    // plot: viewBox 0..F x, y inverted; norm 0..1 maps to y 96..4 (headroom)
+    var Y0 = 4, Y1 = 96;
+    var yOf = function(v){ return Y1 - v * (Y1 - Y0); };
+    var plot = el("svg", {class:"plot", viewBox:"0 0 "+F+" 100", preserveAspectRatio:"none"});
+    var yThr = yOf(thr);
+    plot.appendChild(el("rect", {x:0,y:0,width:F,height:yThr, fill:COL.motion, "fill-opacity":"0.07"}));
+    plot.appendChild(el("rect", {x:0,y:yThr,width:F,height:100-yThr, fill:COL.static, "fill-opacity":"0.06"}));
+    var pts = [];
+    for (var i=0;i<F;i++){
+      var v = a.norm[i];
+      if (v==null) continue;
+      pts.push(i + "," + yOf(v).toFixed(2));
+    }
+    var line = el("polyline", {points:pts.join(" "), fill:"none", stroke:COL[k],
+      "stroke-width":"1.4", "vector-effect":"non-scaling-stroke",
+      "stroke-linejoin":"round", "stroke-linecap":"round"});
+    plot.appendChild(line);
+    var tl = el("line", {x1:0,y1:yThr,x2:F,y2:yThr, stroke:COL.dim, "stroke-width":"1",
+      "stroke-dasharray":"3 3", "vector-effect":"non-scaling-stroke", "stroke-opacity":"0.85"});
+    plot.appendChild(tl);
+    wrap.appendChild(plot);
+
+    // swimlane
+    var swim = el("svg", {class:"swim", viewBox:"0 0 "+F+" 1", preserveAspectRatio:"none"});
+    for (var j=0;j<F;j++){
+      var m = a.motion[j], val = a.valid[j];
+      var fill = !val ? COL.faint : (m ? COL.motion : COL.static);
+      var op = !val ? "0.30" : (m ? "0.92" : "0.5");
+      swim.appendChild(el("rect", {x:j, y:0, width:1.02, height:1, fill:fill, "fill-opacity":op}));
+    }
+    wrap.appendChild(swim);
+    tracksEl.appendChild(wrap);
+
+    // readout cell
+    var cell = document.createElement("div");
+    cell.className = "cell";
+    cell.innerHTML = '<span class="cl">'+shortName(a.id)+'</span>'
+      + '<span class="cv" data-cv>&ndash;</span>'
+      + '<span class="st nd" data-st>&mdash;</span>';
+    rGrid.appendChild(cell);
+
+    trackRefs.push({a:a, k:k, now:wrap.querySelector("[data-now]"),
+      cv:cell.querySelector("[data-cv]"), st:cell.querySelector("[data-st]")});
+  });
+
+  function shortName(id){
+    return {cpu_absdiff:"CPU diff",gpu_absdiff:"GPU diff",nvof:"NvOFA",mog2:"MOG2"}[id];
+  }
+
+  // ---- video + overlay ----
+  var vid = document.getElementById("vid");
+  var ov = document.getElementById("ov");
+  var octx = ov.getContext("2d");
+  var stage = document.getElementById("stage");
+
+  // Inlined as base64; hand the media stack a blob URL instead of a giant
+  // data: URI — it starts playing sooner and seeks reliably.
+  var DATA_URI = "__VIDEO__";
+  (function(){
+    try {
+      var b = atob(DATA_URI.slice(DATA_URI.indexOf(",") + 1));
+      var u8 = new Uint8Array(b.length);
+      for (var i = 0; i < b.length; i++) u8[i] = b.charCodeAt(i);
+      vid.src = URL.createObjectURL(new Blob([u8], {type:"video/mp4"}));
+    } catch(e){ vid.src = DATA_URI; }
+  })();
+
+  var off = document.createElement("canvas");
+  off.width = GW; off.height = GH;
+  var offctx = off.getContext("2d");
+  var offimg = offctx.createImageData(GW, GH);
+
+  var overlayKey = "none";
+  var curFrame = -1;
+
+  function fitOverlay(){
+    var r = stage.getBoundingClientRect();
+    ov.width = Math.round(r.width); ov.height = Math.round(r.height);
+    octx.imageSmoothingEnabled = true;
+    drawOverlay(true);
+  }
+  window.addEventListener("resize", fitOverlay);
+
+  function drawOverlay(force){
+    if (overlayKey === "none"){ octx.clearRect(0,0,ov.width,ov.height); return; }
+    var a = A.find(function(x){ return ACC[x.id] === overlayKey; });
+    if (!a) return;
+    var f = Math.max(0, curFrame);
+    var base = f * GH * GW;
+    var rgb = hexToRgb(COL[overlayKey]);
+    var d = offimg.data;
+    for (var p=0, q=0; p<GH*GW; p++, q+=4){
+      var val = a._heat[base + p];
+      d[q] = rgb[0]; d[q+1] = rgb[1]; d[q+2] = rgb[2];
+      d[q+3] = val;                       // straight alpha ramp
+    }
+    offctx.putImageData(offimg, 0, 0);
+    octx.clearRect(0,0,ov.width,ov.height);
+    octx.globalAlpha = 0.7;
+    octx.drawImage(off, 0, 0, ov.width, ov.height);
+    octx.globalAlpha = 1;
+  }
+
+  document.getElementById("ovbar").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    overlayKey = b.getAttribute("data-k");
+    [].forEach.call(this.children, function(x){
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+    });
+    drawOverlay(true);
+  });
+
+  // ---- transport ----
+  var playhead = document.getElementById("playhead");
+  var deck = document.getElementById("deck");
+  var scrub = document.getElementById("scrub");
+  var fill = document.getElementById("fill");
+  var tick = document.getElementById("tick");
+  var rFrameEl = document.getElementById("r-frame");
+  var rTime = document.getElementById("r-time");
+  var rSrc = document.getElementById("r-src");
+  var keep = V.kept_source_frames || null;
+
+  function frameToTime(f){ return (f + 0.5) / FPS; }
+  function timeToFrame(t){ return Math.max(0, Math.min(F-1, Math.floor(t * FPS + 1e-6))); }
+
+  function render(f){
+    if (f === curFrame) return;
+    curFrame = f;
+    var pct = (f + 0.5) / F * 100;
+    playhead.style.left = pct + "%";
+    fill.style.width = pct + "%";
+    tick.style.left = pct + "%";
+    scrub.setAttribute("aria-valuenow", f);
+
+    rFrameEl.textContent = f;
+    rTime.textContent = (f / FPS).toFixed(2);
+    rSrc.textContent = keep ? keep[f] : "–";
+
+    trackRefs.forEach(function(t){
+      var v = t.a.norm[f], mo = t.a.motion[f], val = t.a.valid[f];
+      if (!val){
+        t.now.textContent = "no data";
+        t.now.style.color = COL.faint;
+        t.cv.textContent = "–";
+        t.st.textContent = "—"; t.st.className = "st nd";
+      } else {
+        t.now.innerHTML = v.toFixed(2) + (mo ? " <b style='color:"+COL.motion+"'>&#9650;</b>" : "");
+        t.now.style.color = COL.dim;
+        t.cv.textContent = v.toFixed(3);
+        t.st.textContent = mo ? "MOTION" : "STATIC";
+        t.st.className = "st " + (mo ? "mo" : "st");
+      }
+    });
+    drawOverlay();
+  }
+
+  // rVFC-driven frame follow
+  function follow(){
+    render(timeToFrame(vid.currentTime));
+    if ("requestVideoFrameCallback" in vid) vid.requestVideoFrameCallback(follow);
+  }
+  if ("requestVideoFrameCallback" in vid) vid.requestVideoFrameCallback(follow);
+  else (function raf(){ render(timeToFrame(vid.currentTime)); requestAnimationFrame(raf); })();
+
+  function seekFrame(f){
+    f = Math.max(0, Math.min(F-1, f));
+    stage.classList.add("touched");
+    vid.currentTime = frameToTime(f);
+    render(f);
+  }
+
+  // play / pause
+  function toggle(){
+    stage.classList.add("touched");
+    if (vid.paused) vid.play(); else vid.pause();
+  }
+  vid.addEventListener("play", function(){ stage.classList.add("playing", "touched"); });
+  vid.addEventListener("pause", function(){ stage.classList.remove("playing"); });
+  vid.addEventListener("ended", function(){ vid.currentTime = 0; render(0); });
+  stage.addEventListener("click", toggle);
+
+  // keyboard
+  window.addEventListener("keydown", function(e){
+    if (e.key === " " || e.code === "Space"){ e.preventDefault(); toggle(); }
+    else if (e.key === "ArrowLeft"){ e.preventDefault(); vid.pause(); seekFrame(curFrame - 1); }
+    else if (e.key === "ArrowRight"){ e.preventDefault(); vid.pause(); seekFrame(curFrame + 1); }
+    else if (e.key === "Home"){ e.preventDefault(); vid.pause(); seekFrame(0); }
+    else if (e.key === "End"){ e.preventDefault(); vid.pause(); seekFrame(F-1); }
+  });
+
+  // drag-to-scrub on the scrubber and the whole track stack
+  function scrubFromX(clientX){
+    var r = deck.getBoundingClientRect();
+    var frac = (clientX - r.left) / r.width;
+    seekFrame(Math.round(frac * F - 0.5));
+  }
+  var dragging = false, wasPlaying = false;
+  function down(e){
+    dragging = true; wasPlaying = !vid.paused; vid.pause();
+    scrubFromX(e.clientX);
+    e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function move(e){ if (dragging) scrubFromX(e.clientX); }
+  function up(){ if (dragging && wasPlaying) vid.play(); dragging = false; }
+  [scrub, document.getElementById("tracks")].forEach(function(node){
+    node.addEventListener("pointerdown", down);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", up);
+    node.addEventListener("pointercancel", up);
+  });
+  scrub.addEventListener("keydown", function(e){
+    if (e.key === "ArrowLeft"){ e.preventDefault(); vid.pause(); seekFrame(curFrame-1); }
+    else if (e.key === "ArrowRight"){ e.preventDefault(); vid.pause(); seekFrame(curFrame+1); }
+  });
+
+  vid.addEventListener("loadeddata", function(){
+    stage.classList.remove("loading");
+    fitOverlay();
+    seekFrame(0);
+  });
+  vid.addEventListener("loadedmetadata", fitOverlay);
+  vid.addEventListener("error", function(){
+    document.getElementById("loadmsg").textContent = "video failed to load";
+  });
+
+  // ---- footer ----
+  var rl = D.run_log || {};
+  document.getElementById("footer").innerHTML =
+    "GPU " + (rl.gpu||"?") + " &middot; driver " + (rl.driver||"?")
+    + " &middot; CUDA " + (rl.cuda||"?") + " &middot; DeepStream " + (rl.deepstream||"?")
+    + "<br>NvOFA via the <code style='font-family:inherit'>nvof</code> DeepStream plugin, preset SLOW, "
+    + "4&times;4 grid &middot; " + (A[2].extra.of_rows) + "&times;" + (A[2].extra.of_cols) + " vectors/frame"
+    + "<br>scores &amp; overlays: percentile-normalised per clip, not comparable across clips";
+})();
+</script>
