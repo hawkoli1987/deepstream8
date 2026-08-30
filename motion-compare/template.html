@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Four Ways to See Motion</title>
+<title>Five Ways to See Motion</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
@@ -11,6 +11,7 @@
     --ink:#E4E6E3; --dim:#868E98; --faint:#545C66;
     --static:#E24A4F; --motion:#2FD08A;
     --cpu:#F0B34A; --gpu:#57A0F4; --nvof:#BE7BF0; --mog:#24C1C1;
+    --far:#F2759E;
     --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
     --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     --col: 640px;
@@ -101,6 +102,7 @@
   .ovbar button .dot{width:8px;height:8px;border-radius:2px;background:currentColor;opacity:.55}
   .ovbar button[data-k="cpu"]{--c:var(--cpu)} .ovbar button[data-k="gpu"]{--c:var(--gpu)}
   .ovbar button[data-k="nvof"]{--c:var(--nvof)} .ovbar button[data-k="mog2"]{--c:var(--mog)}
+  .ovbar button[data-k="far"]{--c:var(--far)}
   .ovbar button:hover{color:var(--ink); border-color:var(--faint)}
   .ovbar button[aria-pressed="true"]{color:var(--ink); border-color:var(--c,var(--faint)); background:var(--panel-2)}
   .ovbar button[aria-pressed="true"] .dot{background:var(--c,var(--ink)); opacity:1; box-shadow:0 0 8px var(--c)}
@@ -142,6 +144,7 @@
   .track .now b{font-weight:500}
   .track[data-k="cpu"]{--c:var(--cpu)} .track[data-k="gpu"]{--c:var(--gpu)}
   .track[data-k="nvof"]{--c:var(--nvof)} .track[data-k="mog2"]{--c:var(--mog)}
+  .track[data-k="far"]{--c:var(--far)}
 
   .track .plot{display:block; width:100%; height:46px}
   .track .swim{display:block; width:100%; height:12px; margin-top:2px}
@@ -192,13 +195,47 @@
     border-bottom:1px solid var(--edge);
   }
   .readout .cell:nth-child(odd){border-right:1px solid var(--edge)}
-  .readout .cell:nth-last-child(-n+2){border-bottom:none}
+  .readout .cell:last-child{grid-column:1/-1; border-right:none; border-bottom:none}
   .readout .cl{color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em; width:64px}
   .readout .cv{color:var(--ink); font-variant-numeric:tabular-nums}
   .readout .st{margin-left:auto; font-size:10px; letter-spacing:.08em; padding:2px 7px; border-radius:2px}
   .readout .st.mo{color:var(--motion); background:rgba(47,208,138,.12)}
   .readout .st.st{color:var(--static); background:rgba(226,74,79,.12)}
   .readout .st.nd{color:var(--faint); background:rgba(84,92,102,.14)}
+
+  /* ---- perf ---- */
+  .perf{margin-top:34px; border:1px solid var(--edge); border-radius:3px;
+    background:var(--panel); padding:18px 16px}
+  .perf[hidden]{display:none}
+  .perf h2{font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--dim); margin-bottom:14px}
+  .pcharts{display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-bottom:16px}
+  .pchart h3{font-family:var(--mono); font-size:10.5px; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--faint); margin-bottom:8px; font-weight:500}
+  .prow{display:grid; grid-template-columns:86px 1fr 76px; gap:8px; align-items:center; margin:5px 0}
+  .prow .lbl{font-family:var(--mono); font-size:10.5px; color:var(--c,var(--dim));
+    text-align:right; letter-spacing:.02em}
+  .prow .barwrap{display:block; background:var(--panel-2); border-radius:2px; height:9px}
+  .prow .bar{display:block; height:9px; background:var(--c,var(--faint)); border-radius:2px; min-width:2px}
+  .prow .val{font-family:var(--mono); font-size:11px; color:var(--ink);
+    font-variant-numeric:tabular-nums; text-align:right}
+  .ptable-wrap{overflow-x:auto}
+  .ptable{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11.5px}
+  .ptable th{font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--faint); text-align:right; padding:6px 8px;
+    border-bottom:1px solid var(--edge); font-weight:500}
+  .ptable th:first-child{text-align:left}
+  .ptable td{padding:7px 8px; border-bottom:1px solid var(--edge); color:var(--dim);
+    text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .ptable tr:last-child td{border-bottom:none}
+  .ptable td.algo{text-align:left; color:var(--c,var(--ink))}
+  .ptable td.note{white-space:normal; text-align:left; font-size:10.5px; color:var(--faint)}
+  .perf .ncu{margin-top:14px}
+  .perf .ncu summary{cursor:pointer; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--dim)}
+  .perf .ncu div{margin-top:10px}
+  .pmethod{margin-top:12px; font-size:11.5px; color:var(--faint); max-width:70ch}
+  @media (max-width:560px){ .pcharts{grid-template-columns:1fr} }
 
   /* ---- notes ---- */
   .notes{margin-top:40px; border-top:1px solid var(--edge); padding-top:24px}
@@ -209,16 +246,24 @@
   .notes h3{font-family:var(--mono); font-size:13px; color:var(--ink); margin:18px 0 5px; font-weight:500}
   .notes p{color:var(--dim); font-size:13px; max-width:64ch; margin-bottom:8px}
   .notes code{font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--panel-2); padding:1px 5px; border-radius:3px}
-  .notes .four{
+  .notes .five{
     display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:14px 0 6px;
   }
-  .notes .four div{
+  .notes .five div{
     border:1px solid var(--edge); border-left-width:2px; border-radius:3px;
     padding:10px 12px; font-size:12.5px; color:var(--dim);
   }
-  .notes .four b{font-family:var(--mono); font-size:11.5px; color:var(--ink); display:block; margin-bottom:3px; letter-spacing:.02em}
-  .notes .four .c-cpu{border-left-color:var(--cpu)} .notes .four .c-gpu{border-left-color:var(--gpu)}
-  .notes .four .c-nvof{border-left-color:var(--nvof)} .notes .four .c-mog{border-left-color:var(--mog)}
+  .notes .five b{font-family:var(--mono); font-size:11.5px; color:var(--ink); display:block; margin-bottom:3px; letter-spacing:.02em}
+  .notes .five .c-cpu{border-left-color:var(--cpu)} .notes .five .c-gpu{border-left-color:var(--gpu)}
+  .notes .five .c-nvof{border-left-color:var(--nvof)} .notes .five .c-mog{border-left-color:var(--mog)}
+  .notes .five .c-far{border-left-color:var(--far)}
+  .notes .five div:last-child{grid-column:1/-1}
+  .notes .five dl.desc{margin:8px 0 0; font-size:11.5px; line-height:1.55}
+  .notes .five dl.desc dt{
+    font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--faint); margin-top:6px;
+  }
+  .notes .five dl.desc dd{margin:1px 0 0}
   footer{margin-top:36px; font-family:var(--mono); font-size:10.5px; color:var(--faint); letter-spacing:.05em; line-height:1.9}
 
   @media (max-width:560px){
@@ -226,7 +271,7 @@
     h1{font-size:24px}
     .readout .grid{grid-template-columns:1fr}
     .readout .cell:nth-child(odd){border-right:none}
-    .notes .four{grid-template-columns:1fr}
+    .notes .five{grid-template-columns:1fr}
   }
 </style>
 
@@ -241,13 +286,15 @@
       <span>Tesla T4</span>
     </div>
 
-    <h1>Four ways to see motion</h1>
+    <h1>Five ways to see motion</h1>
     <p class="dek">
       One fixed camera over a parking deck. Two vehicles cross the aisle; nothing else
-      moves. Four motion-detection algorithms score every frame &mdash; two of them the
+      moves. Five motion-detection algorithms score every frame &mdash; two of them the
       <b>same greyscale frame-difference</b>, once on the CPU and once on the GPU; one the
       NVIDIA hardware <b>Optical&nbsp;Flow Accelerator</b>; one <b>MOG2</b> background
-      subtraction. Scrub the clip and watch where they agree, and where they don't.
+      subtraction; and <b>Farnebäck</b> dense optical flow running on the T4's CUDA
+      cores &mdash; the same job as the NvOFA block, done in software on the SMs.
+      Scrub the clip and watch where they agree, and where they don't.
     </p>
 
     <div class="parity" id="parity"></div>
@@ -267,6 +314,7 @@
       <button data-k="gpu" aria-pressed="false"><span class="dot"></span>GPU absdiff</button>
       <button data-k="nvof" aria-pressed="false"><span class="dot"></span>NvOFA</button>
       <button data-k="mog2" aria-pressed="false"><span class="dot"></span>MOG2</button>
+      <button data-k="far" aria-pressed="false"><span class="dot"></span>Farnebäck</button>
     </div>
 
     <div class="scrub" id="scrub" tabindex="0" role="slider"
@@ -290,6 +338,17 @@
     <div class="playhead" id="playhead"></div>
   </section>
 
+  <section class="perf" id="perf" hidden>
+    <h2>Performance &mdash; one T4, five algorithms</h2>
+    <div class="pcharts" id="p-charts"></div>
+    <div class="ptable-wrap"><table class="ptable" id="p-table"></table></div>
+    <details class="ncu" id="p-ncu-details">
+      <summary>Nsight Compute kernel detail</summary>
+      <div id="p-ncu"></div>
+    </details>
+    <p class="pmethod" id="p-method"></p>
+  </section>
+
   <section class="readout" id="readout" aria-live="off">
     <div class="r-top">
       <span>frame <b id="r-frame">0</b> / <span id="r-fmax">80</span></span>
@@ -302,7 +361,7 @@
   <section class="notes">
     <h2>How the scores are built</h2>
 
-    <h3>One decode, four readers</h3>
+    <h3>One decode, five readers</h3>
     <p>
       <code>sample_cam6.mp4</code> ships with a broken three-frame cadence &mdash; every
       third frame is a byte-duplicate of the one before it. It was de-duplicated to
@@ -318,8 +377,8 @@
       frame diagonal, so the same real motion scores the same at any resolution. Then each
       series is scaled to <code>[0,1]</code> by its own 1st&ndash;99th percentile range.
       That second step is <b>clip-relative</b>: the shapes and the crossings are
-      comparable across the four algorithms, but a 0.8 here is not an absolute motion
-      level. CPU and GPU share one set of scaling constants so their traces stay
+      comparable across the five algorithms, but a 0.8 here is not an absolute motion
+      level. CPU and GPU absdiff share one set of scaling constants so their traces stay
       pixel-identical.
     </p>
 
@@ -327,12 +386,12 @@
     <p>
       One threshold per algorithm, placed by <b>Otsu's method</b> on that algorithm's
       normalised histogram &mdash; the standard way to split one distribution into two
-      classes. Each lands with strong separation (&eta; &gt; 0.8 for all four). A frame is
+      classes. Each lands with strong separation (&eta; &ge; 0.7 for all five). A frame is
       <b>motion</b> when its normalised score is at or above the line.
     </p>
 
-    <h3>What the four are</h3>
-    <div class="four" id="n-four"></div>
+    <h3>What the five are</h3>
+    <div class="five" id="n-five"></div>
 
     <h3>The clip</h3>
     <p>
@@ -355,11 +414,12 @@
   var D = JSON.parse(document.getElementById("data").textContent);
   var V = D.video, G = D.grid, A = D.algorithms;
   var F = V.frame_count, FPS = V.fps, GW = G.cols, GH = G.rows;
-  var ACC = {cpu_absdiff:"cpu",gpu_absdiff:"gpu",nvof:"nvof",mog2:"mog2"};
+  var ACC = {cpu_absdiff:"cpu",gpu_absdiff:"gpu",nvof:"nvof",mog2:"mog2",farneback:"far"};
   var HEX = getComputedStyle(document.documentElement);
   var COL = {
     cpu:HEX.getPropertyValue("--cpu").trim(), gpu:HEX.getPropertyValue("--gpu").trim(),
     nvof:HEX.getPropertyValue("--nvof").trim(), mog2:HEX.getPropertyValue("--mog").trim(),
+    far:HEX.getPropertyValue("--far").trim(),
     motion:HEX.getPropertyValue("--motion").trim(), static:HEX.getPropertyValue("--static").trim(),
     edge:HEX.getPropertyValue("--edge").trim(), faint:HEX.getPropertyValue("--faint").trim(),
     dim:HEX.getPropertyValue("--dim").trim()
@@ -393,18 +453,27 @@
   document.getElementById("n-frames").textContent = F;
   document.getElementById("r-fmax").textContent = F;
 
-  // ---- notes: four cards ----
+  // ---- notes: five cards ----
   var BLURB = {
     cpu_absdiff:["c-cpu","Greyscale absdiff &mdash; CPU","|Y<sub>t</sub> &minus; Y<sub>t&minus;1</sub>| averaged over the disc. The blunt instrument: every changed pixel counts equally, no model, no memory."],
     gpu_absdiff:["c-gpu","Greyscale absdiff &mdash; GPU","The identical calculation in CuPy on the T4. Same integer maths, same reduction &mdash; here to show the two devices agree to the last bit, and what the data transfer costs."],
     nvof:["c-nvof","NVIDIA Optical Flow Accelerator","Dedicated silicon estimates a motion vector for every 4&times;4 block. Mean vector length / frame diagonal. Rejects the static shimmer better than frame differencing."],
-    mog2:["c-mog","MOG2 background subtraction","A per-pixel Gaussian-mixture model of the background; the score is the foreground fraction. Reacts as soon as an object arrives, and holds it &mdash; shadows excluded."]
+    mog2:["c-mog","MOG2 background subtraction","A per-pixel Gaussian-mixture model of the background; the score is the foreground fraction. Reacts as soon as an object arrives, and holds it &mdash; shadows excluded."],
+    farneback:["c-far","Dense optical flow &mdash; CUDA Farnebäck","The same job as the hardware accelerator, done in software: OpenCV's CUDA Farnebäck builds a 5-level pyramid on the T4's SMs and solves for a dense per-pixel flow field. Mean |flow| / frame diagonal."]
   };
-  var nf = document.getElementById("n-four");
+  var nf = document.getElementById("n-five");
   A.forEach(function(a){
     var b = BLURB[a.id]; var d = document.createElement("div");
     d.className = b[0];
-    d.innerHTML = "<b>"+b[1]+"</b>"+b[2];
+    var h = "<b>"+b[1]+"</b>"+b[2];
+    if (a.desc){
+      h += "<dl class='desc'>"
+         + "<dt>Calculation</dt><dd>"+a.desc.calc+"</dd>"
+         + "<dt>Normalization</dt><dd>"+a.desc.norm+"</dd>"
+         + "<dt>Threshold</dt><dd>"+a.desc.thresh+"</dd>"
+         + "</dl>";
+    }
+    d.innerHTML = h;
     nf.appendChild(d);
   });
 
@@ -480,7 +549,7 @@
   });
 
   function shortName(id){
-    return {cpu_absdiff:"CPU diff",gpu_absdiff:"GPU diff",nvof:"NvOFA",mog2:"MOG2"}[id];
+    return {cpu_absdiff:"CPU diff",gpu_absdiff:"GPU diff",nvof:"NvOFA",mog2:"MOG2",farneback:"Farnebäck"}[id];
   }
 
   // ---- video + overlay ----
@@ -661,13 +730,87 @@
     document.getElementById("loadmsg").textContent = "video failed to load";
   });
 
+  // ---- perf section (hidden unless D.perf present) ----
+  (function(){
+    var perf = D.perf;
+    if (!perf || !perf.algos) return;          // section stays hidden
+    document.getElementById("perf").hidden = false;
+
+    var rows = Object.keys(perf.algos).map(function(id){
+      var k = ACC[id];
+      return { id:id, k:k, col:COL[k], name:shortName(id),
+               e2e:perf.algos[id].e2e_ms_per_frame,
+               comp:perf.algos[id].compute_ms_median,
+               sm:perf.algos[id].sm_pct_mean,
+               note:perf.algos[id].note };
+    });
+    rows.sort(function(a,b){ return b.comp - a.comp; });   // slowest first
+
+    function chart(title, pick){
+      var max = Math.max.apply(null, rows.map(pick).concat([1e-9]));
+      var h = '<div class="pchart"><h3>'+title+'</h3>';
+      rows.forEach(function(r){
+        var v = pick(r);
+        h += '<div class="prow" style="--c:'+r.col+'">'
+           + '<span class="lbl">'+r.name+'</span>'
+           + '<span class="barwrap"><span class="bar" style="width:'
+           + Math.max(1.5, 100*v/max).toFixed(1)+'%"></span></span>'
+           + '<span class="val">'+(v>=100 ? v.toFixed(0) : v.toFixed(1))+'</span>'
+           + '</div>';
+      });
+      return h + '</div>';
+    }
+    document.getElementById("p-charts").innerHTML =
+      chart("median compute &mdash; ms per frame", function(r){ return r.comp; })
+      + chart("mean SM busy % &mdash; 1 Hz nvidia-smi", function(r){ return r.sm || 0; });
+
+    var t = '<thead><tr><th>algorithm</th><th>device</th><th>e2e ms/frame</th>'
+          + '<th>compute ms/frame</th><th>SM busy %</th><th>passes</th><th>note</th>'
+          + '</tr></thead><tbody>';
+    rows.forEach(function(r){
+      var a = A.find(function(x){ return x.id === r.id; });
+      t += '<tr style="--c:'+r.col+'">'
+         + '<td class="algo">'+r.name+'</td>'
+         + '<td>'+(a ? a.device : "")+'</td>'
+         + '<td>'+r.e2e.toFixed(2)+'</td>'
+         + '<td>'+r.comp.toFixed(2)+'</td>'
+         + '<td>'+(r.sm==null ? "&ndash;" : r.sm.toFixed(0))+'</td>'
+         + '<td>'+perf.algos[r.id].passes+'</td>'
+         + '<td class="note">'+(r.note||"")+'</td>'
+         + '</tr>';
+    });
+    document.getElementById("p-table").innerHTML = t + '</tbody>';
+
+    var ncuEl = document.getElementById("p-ncu");
+    var det = document.getElementById("p-ncu-details");
+    if (perf.ncu && perf.ncu.available && perf.ncu.kernels.length){
+      var h = '<table class="ptable"><thead><tr><th>algo</th><th>kernel</th>'
+            + '<th>launches</th><th>duration &micro;s</th><th>achieved occ %</th>'
+            + '<th>SM throughput %</th></tr></thead><tbody>';
+      perf.ncu.kernels.forEach(function(k){
+        h += '<tr><td class="algo">'+k.algo+'</td><td class="note">'+k.kernel+'</td>'
+           + '<td>'+(k.launches!=null?k.launches:"&ndash;")+'</td>'
+           + '<td>'+(k.duration_us!=null?k.duration_us:"&ndash;")+'</td>'
+           + '<td>'+(k.occupancy_pct!=null?k.occupancy_pct:"&ndash;")+'</td>'
+           + '<td>'+(k.sm_throughput_pct!=null?k.sm_throughput_pct:"&ndash;")+'</td></tr>';
+      });
+      ncuEl.innerHTML = h + '</tbody></table>';
+    } else {
+      det.hidden = true;
+    }
+
+    document.getElementById("p-method").innerHTML =
+      (perf.method||[]).map(function(s){ return s + " "; }).join("");
+  })();
+
   // ---- footer ----
   var rl = D.run_log || {};
+  var nv = A.find(function(a){ return a.id === "nvof"; });
   document.getElementById("footer").innerHTML =
     "GPU " + (rl.gpu||"?") + " &middot; driver " + (rl.driver||"?")
     + " &middot; CUDA " + (rl.cuda||"?") + " &middot; DeepStream " + (rl.deepstream||"?")
     + "<br>NvOFA via the <code style='font-family:inherit'>nvof</code> DeepStream plugin, preset SLOW, "
-    + "4&times;4 grid &middot; " + (A[2].extra.of_rows) + "&times;" + (A[2].extra.of_cols) + " vectors/frame"
+    + "4&times;4 grid &middot; " + (nv.extra.of_rows) + "&times;" + (nv.extra.of_cols) + " vectors/frame"
     + "<br>scores &amp; overlays: percentile-normalised per clip, not comparable across clips";
 })();
 </script>

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-build_json.py — fuse the four algorithms' raw per-frame scores into the single
+build_json.py — fuse the five algorithms' raw per-frame scores into the single
 JSON the HTML consumes: percentile normalisation, Otsu thresholding (with a
-robust fallback), per-frame motion/static labels, and base64 pooled heat grids.
+robust fallback), per-frame motion/static labels, base64 pooled heat grids,
+per-algorithm Calculation/Normalization/Threshold descriptions, and the T4
+performance block.
 
 Inputs  (in <outdir>):
   cv_scores.npz         from extract_cv.py
   cv_meta.json          "
+  fb_scores.npz         from extract_farneback.py (5th lane)
   of_mv.raw, of_index.csv   from nvof_extract (C)
+  perf.json             from collect_perf.py (optional; HTML hides the section if absent)
 Output:
   <outdir>/motion_scores.json
 """
@@ -104,6 +108,13 @@ def main():
     heat_diff = z["heat_diff"]
     heat_mog = z["heat_mog"]
 
+    # ---- Farnebäck: 5th lane (OpenCV CUDA) ---------------------------------
+    fb = np.load(os.path.join(outdir, "fb_scores.npz"))
+    raw_far = fb["raw_far"].copy()
+    heat_far = fb["heat_far"]
+    fbm = json.load(open(os.path.join(outdir, "fb_meta.json")))
+    v_far = np.zeros(F, bool); v_far[1:] = True
+
     # ---- NvOF: read MV grids, magnitude, pool -----------------------------
     import csv, cv2
     idx = list(csv.DictReader(open(os.path.join(outdir, "of_index.csv"))))
@@ -141,11 +152,30 @@ def main():
     n_gpu, lo_g, hi_g = norm_series(raw_gpu, v_diff, lo_d, hi_d)
     n_nvof, lo_n, hi_n = norm_series(raw_nvof, v_nvof)
     n_mog, lo_m, hi_m = norm_series(raw_mog, v_mog)
+    n_far, lo_f, hi_f = norm_series(raw_far, v_far)
 
-    def block(id_, label, device, unit, raw, norm, valid, lo, hi, heat, extra=None):
+    def block(id_, label, device, unit, raw, norm, valid, lo, hi, heat, extra=None, calc=None):
         thr, meth, eta, cands = pick_threshold(norm, valid)
         motion = (norm >= thr) & valid
         b64, p99 = heat_b64(heat)
+        desc = None
+        if calc:
+            shared = ""
+            if id_ == "cpu_absdiff":
+                shared = " Its constants are shared with gpu_absdiff, so the two traces stay pixel-identical."
+            elif id_ == "gpu_absdiff":
+                shared = " Its constants are shared with cpu_absdiff, so the two traces stay pixel-identical."
+            if meth == "otsu":
+                t_thr = (f"Otsu on the normalised histogram → {thr:.3f} (η={eta:.2f}); "
+                         "motion when norm ≥ thr.")
+            else:
+                t_thr = (f"median + 3·1.4826·MAD → {thr:.3f} (η={eta:.2f}, too bimodal "
+                         "for Otsu); motion when norm ≥ thr.")
+            desc = dict(
+                calc=calc,
+                norm=(f"p1–p99 of this clip's {int(valid.sum())} valid raw scores → [0,1] "
+                      f"(lo={lo:.4f}, hi={hi:.4f})." + shared),
+                thresh=t_thr)
         d = dict(
             id=id_, label=label, device=device, raw_unit=unit,
             first_valid_frame=int(np.argmax(valid)),
@@ -162,34 +192,62 @@ def main():
         )
         if extra:
             d["extra"] = extra
+        if desc:
+            d["desc"] = desc
         return d
 
     algos = [
         block("cpu_absdiff", "Greyscale absdiff", "CPU  numpy",
               "mean |dY| over valid px, /255", raw_cpu, n_cpu, v_diff, lo_c, hi_c,
-              heat_diff, dict(runtime_s=float(cvm["rt_cpu_s"]))),
+              heat_diff, dict(runtime_s=float(cvm["rt_cpu_s"])),
+              calc=("Per frame t≥1: the int16 difference |Y_t − Y_(t−1)|, then the "
+                    "mean over the fisheye disc ÷ 255. No model, no memory.")),
         block("gpu_absdiff", "Greyscale absdiff", "GPU  CuPy (Tesla T4)",
               "mean |dY| over valid px, /255", raw_gpu, n_gpu, v_diff, lo_g, hi_g,
               heat_diff, dict(runtime_s=float(cvm["rt_gpu_s"]),
                               runtime_s_excl_transfer=float(cvm["rt_gpu_s_excl_transfer"]),
-                              heat_shared_with="cpu_absdiff")),
+                              heat_shared_with="cpu_absdiff"),
+              calc=("The identical subtraction and ROI reduction as CuPy kernels on the "
+                    "T4; parity with the CPU path asserted per frame (bit-identical "
+                    "difference images).")),
         block("nvof", "NVIDIA Optical Flow Accelerator", "GPU  NvOFA (Tesla T4)",
               "mean |flow| px / frame-diagonal", raw_nvof, n_nvof, v_nvof, lo_n, hi_n,
               heat_nvof, dict(of_rows=of_rows, of_cols=of_cols,
                               block_size=int(round(H / max(of_rows, 1))),
                               raw_px=[None if not v_nvof[i] else float(raw_nvof[i] * diag)
-                                      for i in range(F)])),
+                                      for i in range(F)]),
+              calc=("Per frame t≥1: the NvOFA engine returns a motion vector for every "
+                    "4×4 block (preset-level 2). Score = mean |MV| over the disc ÷ "
+                    "frame diagonal.")),
         block("mog2", "MOG2 background subtraction", "CPU  OpenCV",
               "foreground px fraction", raw_mog, n_mog, v_mog, lo_m, hi_m,
               heat_mog, dict(runtime_s=float(cvm["rt_mog_s"]), warmup_frames=WARMUP,
                              history=20, var_threshold=16,
                              shadows_counted_as_motion=False,
-                             shadow_fraction=[float(s) for s in shadow])),
+                             shadow_fraction=[float(s) for s in shadow]),
+              calc=("Per-pixel Gaussian-mixture background model (history=20, "
+                    "varThreshold=16; shadows detected but not counted). Score = "
+                    "fraction of disc pixels classified foreground.")),
+        block("farneback", "Dense optical flow (Farnebäck)", "GPU  CUDA (Tesla T4)",
+              "mean |flow| px / frame-diagonal", raw_far, n_far, v_far, lo_f, hi_f,
+              heat_far, dict(rt_pass_s=float(fbm["rt_pass_s"]),
+                             t_calc_median_ms=float(fbm["t_calc_median_ms"]),
+                             params=fbm["params"], cv2_version=fbm["cv2_version"]),
+              calc=("Per frame t≥1: a 5-level half-resolution pyramid, 3 warping "
+                    "iterations per level over a 21×21 window, 5-tap polynomial "
+                    "expansion (σ=1.1) — OpenCV's CUDA Farnebäck. Score = mean |flow| "
+                    "over the disc ÷ frame diagonal.")),
     ]
+
+    # ---- perf (optional: HTML hides the section when absent) --------------
+    perf = None
+    perf_p = os.path.join(outdir, "perf.json")
+    if os.path.exists(perf_p):
+        perf = json.load(open(perf_p))
 
     keep = json.load(open(os.path.join(outdir, "keep.json")))
     doc = dict(
-        schema_version=1,
+        schema_version=2,
         video=dict(file="sample_cam6.mp4", width=W, height=H, fps=FPS,
                    frame_count=F, duration_s=F / FPS, codec="h264",
                    diagonal_px=diag,
@@ -211,9 +269,10 @@ def main():
                     cpu_runtime_s=float(cvm["rt_cpu_s"]),
                     gpu_runtime_s=float(cvm["rt_gpu_s"]),
                     gpu_runtime_s_excl_transfer=float(cvm["rt_gpu_s_excl_transfer"])),
-        run_log=dict(gpu=cvm["gpu_name"], driver="595.91.07", cuda="12.8",
-                     deepstream="8.0.0"),
+        run_log=dict(gpu=cvm["gpu_name"], driver="595.91.07", cv2_cuda=fbm["cv2_version"],
+                     cuda="12.8", deepstream="8.0.0"),
         algorithms=algos,
+        perf=perf,
     )
     p = os.path.join(outdir, "motion_scores.json")
     json.dump(doc, open(p, "w"))

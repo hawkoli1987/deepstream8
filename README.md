@@ -4,7 +4,7 @@ DeepStream 8 workstreams. Each subdirectory is a self-contained piece of work.
 
 | dir | what |
 |-----|------|
-| [`motion-compare/`](motion-compare/) | frame-by-frame comparison of four motion-detection algorithms (CPU/GPU greyscale absdiff, NvOFA, MOG2) on a fixed-camera clip, with a single-page interactive viewer |
+| [`motion-compare/`](motion-compare/) | frame-by-frame comparison of five motion-detection algorithms (CPU/GPU greyscale absdiff, NvOFA, MOG2, CUDA Farnebäck) on a fixed-camera clip, with a single-page interactive viewer and a T4 performance comparison |
 
 ## Not in this repo
 
