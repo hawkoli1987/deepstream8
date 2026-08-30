@@ -5,5 +5,9 @@
 /src/nvof_extract
 __pycache__/
 
+# run artifacts & evidence — kept on disk, not in git
+/perf/
+/qa/
+
 # local ssh known-hosts for this repo's remote (kept in .git/ anyway)
 .git-known-hosts
