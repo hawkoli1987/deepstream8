@@ -126,10 +126,12 @@ def main():
                                        **d})
     perf["ncu"] = ncu
 
+    # frame count from the run's own cv metadata (v1 cam6: 80; v2 clip2: 127)
+    F_txt = str(json.load(open(os.path.join(outdir, "cv_meta.json")))["F"])
     perf["method"] = [
-        "Same 80-frame clip, one algorithm at a time, strictly sequential, "
+        f"Same {F_txt}-frame clip, one algorithm at a time, strictly sequential, "
         "one untimed warm-up pass then repeated full-clip passes to ≥30 s of GPU time per algorithm.",
-        "e2e = median full-clip pass wall / 80. compute = see each row's note "
+        f"e2e = median full-clip pass wall / {F_txt}. compute = see each row's note "
         "(nvof cannot be isolated inside its pipeline: e2e minus the decode-only baseline, an estimate).",
         "SM% = mean of 1 Hz nvidia-smi utilization.gpu over each algorithm's timed window "
         "(a global counter; windows do not overlap because algorithms run sequentially).",

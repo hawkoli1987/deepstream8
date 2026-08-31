@@ -5,20 +5,31 @@ luma (Y) plane: greyscale absdiff on CPU (numpy), the same on GPU (CuPy), and
 MOG2 background subtraction (OpenCV, CPU).
 
 Input : a raw yuv420p dump of the clip (all frames), + geometry on the CLI.
+        --roi fisheye|full   fisheye = inscribed-disc mask estimated from the
+                             time-mean luma (cam6); full = whole frame (a normal
+                             fixed CCTV camera has no dead corners).
 Output: <out>/cv_scores.npz  with, per algorithm:
           raw[F]        float64   intensive score, resolution-independent
           heat[F,GH,GW] uint8     pooled activity grid (0..255), pre-normalisation
         plus:
-          roi_mask[H,W] bool      valid (non-corner) pixels
+          roi_mask[H,W] bool      valid pixels
           valid_pixel_fraction    float
           runtime_s per algo, and the CPU/GPU parity numbers.
 
 All three algorithms see the identical uint8 Y bytes.
+
+usage: extract_cv.py <clip.yuv> <W> <H> <F> <outdir> [--roi fisheye|full]
 """
 import sys, os, json, time
 import numpy as np
 
-GRID_W, GRID_H = 46, 43            # pooled overlay grid; ~32 px cells at 1472x1384
+GRID_W, GRID_H = 46, 43            # pooled overlay grid; set from W,H in main()
+
+
+def set_grid(W: int, H: int):
+    """~32 px cells at any resolution: 1472x1384 -> 46x43, 1280x720 -> 40x22."""
+    global GRID_W, GRID_H
+    GRID_W, GRID_H = max(8, W // 32), max(8, H // 32)
 
 
 def pool(mapf: np.ndarray) -> np.ndarray:
@@ -29,10 +40,23 @@ def pool(mapf: np.ndarray) -> np.ndarray:
 
 
 def main():
-    if len(sys.argv) != 6:
-        sys.exit("usage: extract_cv.py <cam6.yuv> <W> <H> <F> <outdir>")
-    yuv_path, W, H, F, outdir = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), \
-        int(sys.argv[4]), sys.argv[5]
+    # ---- CLI: 5 positionals + optional --roi (default fisheye = v1 behaviour) ----
+    args = sys.argv[1:]
+    roi_kind = "fisheye"
+    if "--roi" in args:
+        i = args.index("--roi")
+        try:
+            roi_kind = args[i + 1]
+        except IndexError:
+            sys.exit("--roi needs fisheye|full")
+        del args[i:i + 2]
+    if len(args) != 5:
+        sys.exit("usage: extract_cv.py <clip.yuv> <W> <H> <F> <outdir> [--roi fisheye|full]")
+    if roi_kind not in ("fisheye", "full"):
+        sys.exit("--roi must be fisheye or full")
+    yuv_path, W, H, F, outdir = args[0], int(args[1]), int(args[2]), \
+        int(args[3]), args[4]
+    set_grid(W, H)
     import cv2
 
     frame_bytes = W * H * 3 // 2
@@ -43,20 +67,26 @@ def main():
     buf = np.memmap(yuv_path, dtype=np.uint8, mode="r")
     Y = buf.reshape(F, frame_bytes)[:, : W * H].reshape(F, H, W)   # luma only
 
-    # ---- ROI mask: keep only the illuminated fisheye disc -------------------
-    # The clip is a circular fisheye inscribed in the frame height; corners are
-    # dead (compression-noisy) black. Estimate the disc from a per-column /
-    # per-row profile of the time-mean luma, then take the inscribed circle.
-    tmean = Y.mean(axis=0)
-    col_on = np.where(tmean.mean(axis=0) > 16)[0]
-    row_on = np.where(tmean.mean(axis=1) > 16)[0]
-    cx = 0.5 * (col_on[0] + col_on[-1])
-    cy = 0.5 * (row_on[0] + row_on[-1])
-    rad = 0.5 * min(col_on[-1] - col_on[0], row_on[-1] - row_on[0])
-    roi = np.zeros((H, W), np.uint8)
-    cv2.circle(roi, (int(round(cx)), int(round(cy))), int(round(rad * 0.97)), 1, -1)
-    roi = roi.astype(bool)
-    print(f"fisheye disc: centre=({cx:.0f},{cy:.0f}) r={rad:.0f}")
+    # ---- ROI mask --------------------------------------------------------
+    if roi_kind == "full":
+        # A normal fixed camera has no dead corners: every pixel counts.
+        roi = np.ones((H, W), bool)
+        print("ROI: full frame (no fisheye mask)")
+    else:
+        # The clip is a circular fisheye inscribed in the frame height; corners
+        # are dead (compression-noisy) black. Estimate the disc from a
+        # per-column / per-row profile of the time-mean luma, then take the
+        # inscribed circle.
+        tmean = Y.mean(axis=0)
+        col_on = np.where(tmean.mean(axis=0) > 16)[0]
+        row_on = np.where(tmean.mean(axis=1) > 16)[0]
+        cx = 0.5 * (col_on[0] + col_on[-1])
+        cy = 0.5 * (row_on[0] + row_on[-1])
+        rad = 0.5 * min(col_on[-1] - col_on[0], row_on[-1] - row_on[0])
+        roi = np.zeros((H, W), np.uint8)
+        cv2.circle(roi, (int(round(cx)), int(round(cy))), int(round(rad * 0.97)), 1, -1)
+        roi = roi.astype(bool)
+        print(f"fisheye disc: centre=({cx:.0f},{cy:.0f}) r={rad:.0f}")
     n_valid = int(roi.sum())
     valid_frac = n_valid / (W * H)
     print(f"ROI: {n_valid}/{W*H} px valid ({valid_frac:.3f})")
@@ -146,7 +176,7 @@ def main():
              rt_cpu=rt_cpu, rt_gpu=rt_gpu, rt_gpu_nox=rt_gpu_nox, rt_mog=rt_mog)
 
     meta = dict(
-        W=W, H=H, F=F, grid_w=GRID_W, grid_h=GRID_H,
+        W=W, H=H, F=F, grid_w=GRID_W, grid_h=GRID_H, roi_kind=roi_kind,
         valid_pixel_fraction=valid_frac,
         parity_bit_identical=bool(parity_bit_identical),
         max_abs_delta_raw=max_abs_delta,

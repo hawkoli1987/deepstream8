@@ -17,7 +17,13 @@ usage: extract_farneback.py <cam6d.yuv> <W> <H> <F> <outdir>
 import sys, os, json, time
 import numpy as np
 
-GRID_W, GRID_H = 46, 43            # pooled overlay grid; matches extract_cv.py
+GRID_W, GRID_H = 46, 43            # pooled overlay grid; set from W,H in main()
+
+
+def set_grid(W: int, H: int):
+    """~32 px cells at any resolution; must match extract_cv.py exactly."""
+    global GRID_W, GRID_H
+    GRID_W, GRID_H = max(8, W // 32), max(8, H // 32)
 
 
 def pool(mapf):
@@ -85,6 +91,7 @@ def main():
         sys.exit("usage: extract_farneback.py <cam6d.yuv> <W> <H> <F> <outdir>")
     yuv_path, W, H, F, outdir = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), \
         int(sys.argv[4]), sys.argv[5]
+    set_grid(W, H)
     import cv2
 
     frame_bytes = W * H * 3 // 2

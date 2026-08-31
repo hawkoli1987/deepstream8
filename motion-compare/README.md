@@ -6,12 +6,17 @@ latency/occupancy benchmark.
 
 ## The deliverable
 
-**`motion-compare.html`** — self-contained (video + data inlined), ~15 MB.
+**`motion-compare-v1.html`** — self-contained (video + data inlined), ~15 MB.
 Open it in a browser. Scrub the one timeline; the video, five score plots and
 five red/green swimlanes all move under one playhead. Toggle a per-algorithm
 overlay on the video. Space / click = play-pause, arrows = step, drag anywhere
 on the timeline = scrub. A performance section compares latency (e2e and
 compute-only ms/frame) and SM occupancy across all five.
+
+**`motion-compare-v2.html`** — the same instrument on a **non-fisheye** carpark clip
+(1280×720 fixed camera, sourced from Pexels, free license), built with
+`python3 src/build_html.py templates/carpark.html runs/carpark/clip/clip2.mp4 runs/carpark/scores/motion_scores.json motion-compare-v2.html`
+after running the pipeline with `--roi full`; see `runs/carpark/` (local) for the clip and run data.
 
 ## The five algorithms
 
@@ -45,9 +50,9 @@ build_json.py   percentile normalisation (1–99, per clip; CPU+GPU share
                 Calculation/Normalization/Threshold descriptions,
                 perf block  → motion_scores.json
   ▼
-build_html.py   inline cam6d.mp4 (base64) + motion_scores.json into template.html
+build_html.py   inline cam6d.mp4 (base64) + motion_scores.json into templates/cam6.html
   ▼
-motion-compare.html
+motion-compare-v1.html
 ```
 
 ## Key results
@@ -70,12 +75,13 @@ motion-compare.html
 
 ## Files
 
-- `motion-compare.html` — the deliverable
-- `template.html` — the page without the inlined assets (`__VIDEO__`, `__DATA__`)
-- `cam6d.mp4`, `motion_scores.json` — the inlined assets, standalone
-- `perf/` — benchmark provenance (`bench.json`, `sm.csv`, `perf.json`, logs) — local only, gitignored
+- `motion-compare-v1.html`, `motion-compare-v2.html` — the deliverables (self-contained)
+- `templates/` — the pages without inlined assets (`__VIDEO__`, `__DATA__`); `cam6.html` = v1, `carpark.html` = v2
+- `runs/<clip>/` — per-run data, gitignored, one dir per clip:
+  `clip/` (prepared mp4) · `scores/` (`motion_scores.json`) · `perf/` (bench + SM-sampling provenance) ·
+  `qa/` (verification frames) · `sheets/` (candidate contact sheets, v2)
+- `data/` — raw source videos (Pexels candidates) — local only, gitignored
 - `src/` — the pipeline scripts; `src/diag/` — throwaway diagnostics
-- `qa/` — verification frames (motion frames, difference images, ROI mask, NvOF fields) — local only, gitignored
 - `container-workspace.inspect.json` — the Brev container's original `docker run` config
 
 ## Reproducing the benchmark
@@ -87,5 +93,5 @@ python3 src/extract_cv.py cam6d.yuv 1472 1384 80 out     # cpu/gpu absdiff + MOG
 python3 src/extract_farneback.py cam6d.yuv 1472 1384 80 out
 bash src/run_bench.sh                                    # SM poller + bench.py + ncu + collect_perf
 python3 src/build_json.py out                            # fuse → motion_scores.json (+ perf)
-python3 src/build_html.py                                # local: inline assets → the deliverable
+python3 src/build_html.py                                # local: inline assets → motion-compare-v1.html
 ```

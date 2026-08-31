@@ -17,7 +17,7 @@ nvidia-smi poller (bench_sm.py) can attribute SM% per algorithm afterwards.
                             NOT separable in-pipeline -> collect_perf.py
                             reports e2e minus the decode-only baseline
 
-usage: bench.py <cam6d.yuv> <W> <H> <F> <outdir> [--min-window 30] [--video /work/cam6d.mp4]
+usage: bench.py <clip.yuv> <W> <H> <F> <outdir> [--min-window 30] [--video /work/<clip>.mp4]
 """
 import sys, os, json, time, statistics
 import numpy as np
@@ -132,8 +132,8 @@ def bench_entry_from_runs(runs, nframes, t_start, t_end):
 
 def main():
     if len(sys.argv) < 6:
-        sys.exit("usage: bench.py <cam6d.yuv> <W> <H> <F> <outdir> "
-                 "[--min-window 30] [--video /work/cam6d.mp4]")
+        sys.exit("usage: bench.py <clip.yuv> <W> <H> <F> <outdir> "
+                 "[--min-window 30] [--video /work/<clip>.mp4]")
     yuv, W, H, F, outdir = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), \
         int(sys.argv[4]), sys.argv[5]
     args = sys.argv[6:]

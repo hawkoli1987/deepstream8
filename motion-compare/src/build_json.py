@@ -8,17 +8,30 @@ performance block.
 
 Inputs  (in <outdir>):
   cv_scores.npz         from extract_cv.py
-  cv_meta.json          "
+  cv_meta.json
   fb_scores.npz         from extract_farneback.py (5th lane)
   of_mv.raw, of_index.csv   from nvof_extract (C)
-  perf.json             from collect_perf.py (optional; HTML hides the section if absent)
+  keep.json             display-frame -> source-frame list (v2: identity)
+  clip.json             optional clip metadata; cam6 defaults when absent:
+                        {file, note, source_note, fps, roi_noun}
+  perf.json             from collect_perf.py (optional; HTML publishes it; absent → hidden section)
 Output:
   <outdir>/motion_scores.json
 """
 import sys, os, json, base64
 import numpy as np
 
-FPS = 8.0   # nominal display rate of the de-duplicated clip
+FPS = 8.0   # nominal display rate; clip.json fps overrides when present
+
+# cam6 defaults — a clip.json in <outdir> overrides any of these
+CLIP_DEFAULTS = dict(
+    file="sample_cam6.mp4",
+    note="360-degree fisheye over a parking area; aisle traffic vs parked cars",
+    source_note=("sample_cam6.mp4 ships with a broken 3-frame cadence "
+                 "(every 3rd frame a duplicate). De-duplicated to ~80 unique "
+                 "frames from the original 120; shown here at 8 fps."),
+    roi_noun="fisheye disc",
+)
 
 
 def otsu_threshold(x, bins=256):
@@ -94,6 +107,12 @@ def norm_series(raw, valid, lo=None, hi=None):
 
 
 def main():
+    outdir = sys.argv[1] if len(sys.argv) > 1 else "out"
+    clip = dict(CLIP_DEFAULTS)
+    clip_p = os.path.join(outdir, "clip.json")
+    if os.path.exists(clip_p):
+        clip.update(json.load(open(clip_p)))
+    fps = float(clip.get("fps", FPS))
     outdir = sys.argv[1] if len(sys.argv) > 1 else "out"
     z = np.load(os.path.join(outdir, "cv_scores.npz"))
     cvm = json.load(open(os.path.join(outdir, "cv_meta.json")))
@@ -196,12 +215,13 @@ def main():
             d["desc"] = desc
         return d
 
+    roi_n = clip["roi_noun"]
     algos = [
         block("cpu_absdiff", "Greyscale absdiff", "CPU  numpy",
               "mean |dY| over valid px, /255", raw_cpu, n_cpu, v_diff, lo_c, hi_c,
               heat_diff, dict(runtime_s=float(cvm["rt_cpu_s"])),
-              calc=("Per frame t≥1: the int16 difference |Y_t − Y_(t−1)|, then the "
-                    "mean over the fisheye disc ÷ 255. No model, no memory.")),
+              calc=(f"Per frame t≥1: the int16 difference |Y_t − Y_(t−1)|, then the "
+                    f"mean over the {roi_n} ÷ 255. No model, no memory.")),
         block("gpu_absdiff", "Greyscale absdiff", "GPU  CuPy (Tesla T4)",
               "mean |dY| over valid px, /255", raw_gpu, n_gpu, v_diff, lo_g, hi_g,
               heat_diff, dict(runtime_s=float(cvm["rt_gpu_s"]),
@@ -216,27 +236,27 @@ def main():
                               block_size=int(round(H / max(of_rows, 1))),
                               raw_px=[None if not v_nvof[i] else float(raw_nvof[i] * diag)
                                       for i in range(F)]),
-              calc=("Per frame t≥1: the NvOFA engine returns a motion vector for every "
-                    "4×4 block (preset-level 2). Score = mean |MV| over the disc ÷ "
-                    "frame diagonal.")),
+              calc=(f"Per frame t≥1: the NvOFA engine returns a motion vector for every "
+                    f"4×4 block (preset-level 2). Score = mean |MV| over the {roi_n} ÷ "
+                    f"frame diagonal.")),
         block("mog2", "MOG2 background subtraction", "CPU  OpenCV",
               "foreground px fraction", raw_mog, n_mog, v_mog, lo_m, hi_m,
               heat_mog, dict(runtime_s=float(cvm["rt_mog_s"]), warmup_frames=WARMUP,
                              history=20, var_threshold=16,
                              shadows_counted_as_motion=False,
                              shadow_fraction=[float(s) for s in shadow]),
-              calc=("Per-pixel Gaussian-mixture background model (history=20, "
-                    "varThreshold=16; shadows detected but not counted). Score = "
-                    "fraction of disc pixels classified foreground.")),
+              calc=(f"Per-pixel Gaussian-mixture background model (history=20, "
+                    f"varThreshold=16; shadows detected but not counted). Score = "
+                    f"fraction of {roi_n} pixels classified foreground.")),
         block("farneback", "Dense optical flow (Farnebäck)", "GPU  CUDA (Tesla T4)",
               "mean |flow| px / frame-diagonal", raw_far, n_far, v_far, lo_f, hi_f,
               heat_far, dict(rt_pass_s=float(fbm["rt_pass_s"]),
                              t_calc_median_ms=float(fbm["t_calc_median_ms"]),
                              params=fbm["params"], cv2_version=fbm["cv2_version"]),
-              calc=("Per frame t≥1: a 5-level half-resolution pyramid, 3 warping "
-                    "iterations per level over a 21×21 window, 5-tap polynomial "
-                    "expansion (σ=1.1) — OpenCV's CUDA Farnebäck. Score = mean |flow| "
-                    "over the disc ÷ frame diagonal.")),
+              calc=(f"Per frame t≥1: a 5-level half-resolution pyramid, 3 warping "
+                    f"iterations per level over a 21×21 window, 5-tap polynomial "
+                    f"expansion (σ=1.1) — OpenCV's CUDA Farnebäck. Score = mean |flow| "
+                    f"over the {roi_n} ÷ frame diagonal.")),
     ]
 
     # ---- perf (optional: HTML hides the section when absent) --------------
@@ -248,13 +268,11 @@ def main():
     keep = json.load(open(os.path.join(outdir, "keep.json")))
     doc = dict(
         schema_version=2,
-        video=dict(file="sample_cam6.mp4", width=W, height=H, fps=FPS,
-                   frame_count=F, duration_s=F / FPS, codec="h264",
+        video=dict(file=clip["file"], width=W, height=H, fps=fps,
+                   frame_count=F, duration_s=F / fps, codec="h264",
                    diagonal_px=diag,
-                   note="360-degree fisheye over a parking area; aisle traffic vs parked cars",
-                   source_note=(f"sample_cam6.mp4 ships with a broken 3-frame cadence "
-                                f"(every 3rd frame a duplicate). De-duplicated to {F} unique "
-                                f"frames from the original 120; shown here at {FPS:g} fps."),
+                   note=clip["note"],
+                   source_note=clip["source_note"],
                    kept_source_frames=keep["keep"]),
         grid=dict(cols=GW, rows=GH),
         normalization=dict(method="percentile_robust", p_lo=1, p_hi=99,
