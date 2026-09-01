@@ -108,6 +108,14 @@
   .ovbar button[aria-pressed="true"] .dot{background:var(--c,var(--ink)); opacity:1; box-shadow:0 0 8px var(--c)}
   .ovbar button:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
 
+  /* playback speed chips — same chips, smaller */
+  .speedbar{margin-top:0}
+  .speedbar .splabel{
+    font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--faint); align-self:center; margin:0 4px 0 2px;
+  }
+  .speedbar button{padding:4px 8px; font-size:10.5px}
+
   /* one scrubber */
   .scrub{
     position:relative; height:26px; margin:4px 0 2px; cursor:ew-resize;
@@ -315,6 +323,15 @@
       <button data-k="nvof" aria-pressed="false"><span class="dot"></span>NvOFA</button>
       <button data-k="mog2" aria-pressed="false"><span class="dot"></span>MOG2</button>
       <button data-k="far" aria-pressed="false"><span class="dot"></span>Farnebäck</button>
+    </div>
+
+    <div class="ovbar speedbar" id="speedbar" role="group" aria-label="Playback speed">
+      <span class="splabel">speed</span>
+      <button data-rate="0.1" aria-pressed="false">0.1&times;</button>
+      <button data-rate="0.25" aria-pressed="false">0.25&times;</button>
+      <button data-rate="0.5" aria-pressed="false">0.5&times;</button>
+      <button data-rate="1" aria-pressed="true">1&times;</button>
+      <button data-rate="2" aria-pressed="false">2&times;</button>
     </div>
 
     <div class="scrub" id="scrub" tabindex="0" role="slider"
@@ -614,6 +631,22 @@
     });
     drawOverlay(true);
   });
+
+  // ---- playback speed ----
+  var speedbar = document.getElementById("speedbar");
+  function setRate(r){
+    vid.playbackRate = r;
+    vid.defaultPlaybackRate = r;   // rate survives the ended -> restart reset
+    [].forEach.call(speedbar.querySelectorAll("button"), function(b){
+      b.setAttribute("aria-pressed",
+        parseFloat(b.getAttribute("data-rate")) === r ? "true" : "false");
+    });
+  }
+  speedbar.addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    setRate(parseFloat(b.getAttribute("data-rate")));
+  });
+  setRate(1);
 
   // ---- transport ----
   var playhead = document.getElementById("playhead");
