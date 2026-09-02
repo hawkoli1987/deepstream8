@@ -1,0 +1,186 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>motion-compare &mdash; candidate screener</title>
+<style>
+  :root{
+    --bg:#0F1113; --panel:#16191E; --panel-2:#1D222A; --edge:#2B323B;
+    --ink:#E4E6E3; --dim:#868E98; --faint:#545C66;
+    --motion:#2FD08A; --static:#E24A4F;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg); color:var(--ink); font-family:var(--mono); font-size:13px; padding:28px 22px 80px}
+  h1{font-size:15px; font-weight:600; letter-spacing:.04em; margin-bottom:6px}
+  .sub{color:var(--dim); font-size:11.5px; margin-bottom:22px}
+  .card{border:1px solid var(--edge); border-radius:3px; background:var(--panel); padding:14px; margin-bottom:14px}
+  .card h2{font-size:12.5px; font-weight:500; margin-bottom:2px}
+  .card .meta{color:var(--dim); font-size:11px; margin-bottom:10px}
+  .card .p{color:var(--motion); font-size:11px}
+  .card .fail{color:var(--static); font-size:11px}
+  .row{display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap}
+  canvas.thumb{width:150px; height:auto; border:1px solid var(--edge); border-radius:2px; background:#000; flex:none}
+  .curves{flex:1; min-width:320px}
+  .curve{display:block; width:100%; height:44px; border:1px solid var(--edge); background:var(--panel-2); margin-bottom:3px}
+  .swim{display:block; width:100%; height:10px; border:1px solid var(--edge); background:var(--panel-2)}
+  .stats{margin-top:10px; font-size:11.5px; color:var(--dim); line-height:1.7}
+  .stats b{color:var(--ink); font-weight:500}
+  .stats .ok{color:var(--motion)}
+  .stats .bad{color:var(--static)}
+  .ev{color:var(--faint)}
+</style>
+
+<h1>candidate screener &mdash; fixed camera, quiet scene, discrete events</h1>
+<div class="sub">frame-to-frame mean absdiff on the luma of 128&times;N downsampled frames;
+  &le;300 samples/clip (&asymp;8 Hz). quiet = diff &lt; max(1.5, p50&middot;0.6, p90&middot;0.35);
+  event = &ge;2 consecutive samples with diff &ge; max(3, p90&middot;0.6)</div>
+
+<div id="cards"></div>
+
+<script>
+(function(){
+"use strict";
+var CLIPS = [
+  {id:"pex19217892", label:"empty parking garage, large ceiling (search: parking garage)"},
+  {id:"pex5972195",  label:"empty mall parking (search: parking garage)"},
+  {id:"pex4707190",  label:"a car stopping in a parking lot (search: parking garage)"},
+  {id:"pex6028882",  label:"video of a parking deck (search: parking garage)"},
+  {id:"pex9100884",  label:"a covered parking lot (v2 candidate A, never used)"}
+];
+
+var cardsEl = document.getElementById("cards");
+var RESULTS = {};
+
+CLIPS.forEach(function(c, i){
+  var d = document.createElement("div");
+  d.className = "card";
+  d.innerHTML =
+    '<h2>'+(i+1)+'. '+c.id+'</h2>'
+    + '<div class="meta">'+c.label+'</div>'
+    + '<div class="p">fetching&hellip;</div>'
+    + '<div class="row"><canvas class="thumb" width="150" height="84"></canvas>'
+    + '<div class="curves"><canvas class="curve" width="600" height="44"></canvas>'
+    + '<canvas class="swim" width="600" height="10"></canvas></div></div>'
+    + '<div class="stats">-</div>';
+  cardsEl.appendChild(d);
+  run(c, d);
+});
+
+function seek(v, t){
+  return new Promise(function(res){
+    function h(){ v.removeEventListener("seeked", h); res(); }
+    v.addEventListener("seeked", h);
+    v.currentTime = t;
+  });
+}
+
+function run(clip, card){
+  var pEl = card.querySelector(".p"), statsEl = card.querySelector(".stats");
+  fetch("../data/candidates-2026-09-02/" + clip.id + ".mp4")
+    .then(function(r){ return r.blob(); })
+    .then(function(blob){
+      var v = document.createElement("video");
+      v.muted = true; v.playsInline = true; v.preload = "auto";
+      v.src = URL.createObjectURL(blob);
+      pEl.textContent = "loading metadata…";
+      v.addEventListener("loadedmetadata", function(){
+        var dur = v.duration, W = v.videoWidth, H = v.videoHeight;
+        if (!isFinite(dur) || !W || !H){ fail("metadata bad (dur=" + dur + ")"); return; }
+        var cw = 128, ch = Math.max(2, Math.round(128*H/W/2)*2);
+        var c = document.createElement("canvas"); c.width = cw; c.height = ch;
+        var ctx = c.getContext("2d", {willReadFrequently:true});
+        var thumb = card.querySelector(".thumb");
+        var N = Math.min(300, Math.max(60, Math.round(dur*8)));
+        var diffs = [], prev = null;
+        pEl.textContent = "sampling 0/"+N;
+
+        function step(k){
+          if (k >= N){ return stats(diffs, dur, W, H, N, thumb, v, c, ctx, card, clip); }
+          var t = 0.04 + (k/(N-1))*(dur-0.12);
+          seek(v, t).then(function(){
+            ctx.drawImage(v, 0, 0, cw, ch);
+            var d = ctx.getImageData(0, 0, cw, ch).data;
+            var luma = new Float32Array(cw*ch);
+            for (var p=0, q=0; p<luma.length; p++, q+=4)
+              luma[p] = 0.299*d[q] + 0.587*d[q+1] + 0.114*d[q+2];
+            var s = 0;
+            if (prev){ for (var j=0; j<luma.length; j++) s += Math.abs(luma[j]-prev[j]); diffs.push(s/luma.length); }
+            else diffs.push(0);
+            prev = luma;
+            if (k === 0){ var tc = thumb.getContext("2d"); thumb.height = Math.round(150*H/W); tc.drawImage(v, 0, 0, thumb.width, thumb.height); }
+            pEl.textContent = "sampling " + (k+1) + "/" + N;
+            setTimeout(function(){ step(k+1); }, 0);
+          });
+        }
+        step(0);
+      });
+      v.addEventListener("error", function(){ fail("video decode failed — media stack wedged?"); });
+    })
+    .catch(function(e){ fail("fetch failed: " + e); });
+
+  function fail(msg){ pEl.textContent = ""; card.querySelector(".meta").innerHTML += ' <span class="fail">FAIL: '+msg+'</span>'; }
+}
+
+function stats(diffs, dur, W, H, N, thumb, v, c, ctx, card, clip){
+  var sorted = diffs.slice().sort(function(a,b){ return a-b; });
+  function q(p){ return sorted[Math.min(sorted.length-1, Math.max(0, Math.floor(p*sorted.length)))]; }
+  var p50 = q(0.5), p90 = q(0.9), p99 = q(0.99);
+  var quietThr  = Math.max(1.5, p50*0.6, p90*0.35);
+  var motionThr = Math.max(3.0, p90*0.6);
+  var quiet = 0, motion = [];
+  diffs.forEach(function(d){
+    var isMo = d >= motionThr;
+    motion.push(isMo);
+    if (d < quietThr) quiet++;
+  });
+  // events: contiguous motion runs, length>=2 samples
+  var events = [], run = null;
+  motion.forEach(function(m, i){
+    if (m){ if (!run) run = {s:i, e:i}; else run.e = i; }
+    else if (run){ events.push(run); run = null; }
+  });
+  if (run) events.push(run);
+  events = events.filter(function(r){ return r.e - r.s >= 1; });
+  var dt = (dur-0.16)/(N-1);
+  var evStr = events.map(function(r){
+    return 't=' + (0.04 + r.s*dt).toFixed(1) + '–' + (0.04 + (r.e+1)*dt).toFixed(1) + 's';
+  }).join(', ');
+
+  // sparkline
+  var curve = card.querySelector(".curve"), swim = card.querySelector(".swim");
+  var cctx = curve.getContext("2d"), sctx = swim.getContext("2d");
+  var maxD = Math.max.apply(null, diffs.concat([1e-6]));
+  cctx.fillStyle = "#1D222A"; cctx.fillRect(0,0,curve.width,curve.height);
+  cctx.strokeStyle = "#2FD08A"; cctx.lineWidth = 1.2; cctx.beginPath();
+  for (var i=0; i<diffs.length; i++){
+    var x = i/(diffs.length-1)*curve.width;
+    var y = curve.height-3 - (diffs[i]/maxD)*(curve.height-8);
+    i ? cctx.lineTo(x,y) : cctx.moveTo(x,y);
+  }
+  cctx.stroke();
+  var mw = curve.width/motion.length;
+  motion.forEach(function(m, i){
+    sctx.fillStyle = m ? "#2FD08A" : "#545C66";
+    sctx.globalAlpha = m ? 0.95 : 0.45;
+    sctx.fillRect(i*mw, 0, Math.ceil(mw), swim.height);
+  });
+  sctx.globalAlpha = 1;
+
+  var quietPct = Math.round(quiet/N*100);
+  var verdict = quietPct >= 30 && events.length >= 1 && events.length <= 6;
+  statsEl.innerHTML =
+    'res <b>'+W+'×'+H+'</b> · dur <b>'+dur.toFixed(1)+'s</b> · samples <b>'+N+'</b> (≈'+(N/dur).toFixed(1)+'/s)'
+    + ' · p50 <b>'+p50.toFixed(2)+'</b> p90 <b>'+p90.toFixed(2)+'</b> p99 <b>'+p99.toFixed(2)+'</b>'
+    + '<br>quiet <b class="'+(quietPct>=30?'ok':'bad')+'">'+quietPct+'%</b>'
+    + ' · events <b class="'+(events.length>=1&&events.length<=6?'ok':'bad')+'">'+events.length+'</b>'
+    + (evStr ? ' <span class="ev">('+evStr+')</span>' : '')
+    + ' · verdict <b class="'+(verdict?'ok':'bad')+'">'+(verdict?'GOOD CANDIDATE':'REJECT')+'</b>';
+  RESULTS[clip.id] = {
+    res: W+"×"+H, dur:+dur.toFixed(1), samples:N, p50:+p50.toFixed(3), p90:+p90.toFixed(3), p99:+p99.toFixed(3),
+    quiet_pct: quietPct, events: events.length,
+    event_times_s: events.map(function(r){ return [+(0.04+r.s*dt).toFixed(1), +(0.04+(r.e+1)*dt).toFixed(1)]; }),
+    verdict: verdict ? "GOOD" : "REJECT"
+  };
+  document.title = "screener · " + Object.keys(RESULTS).length + "/" + CLIPS.length + " done";
+}
+})();
+</script>
