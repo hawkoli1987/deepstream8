@@ -18,6 +18,13 @@ compute-only ms/frame) and SM occupancy across all five.
 `python3 src/build_html.py templates/carpark.html runs/carpark/clip/clip2.mp4 runs/carpark/scores/motion_scores.json motion-compare-v2.html`
 after running the pipeline with `--roi full`; see `runs/carpark/` (local) for the clip and run data.
 
+**`motion-compare-v3.html`** — the same instrument on a **foggy night street** clip
+(1280×720 fixed camera on a gas station; Pexels 34964490, free license; a foreground
+pedestrian and passing cars against long still stretches), built with
+`python3 src/build_html.py templates/street.html runs/street/clip/clip3.mp4 runs/street/scores/motion_scores.json motion-compare-v3.html`
+after running the pipeline with `--roi full`; see `runs/street/` (local) for the clip and run data,
+`data/src/` for the original downloads.
+
 ## The five algorithms
 
 | id | what | device |

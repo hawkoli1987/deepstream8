@@ -24,7 +24,7 @@ python3 src/bench.py "$YUV" "$W" "$H" "$F" "$OUT" --min-window 30 --video "$MP4"
 # ---- ncu, best effort ----------------------------------------------------
 if command -v ncu >/dev/null 2>&1 || apt-get install -y -qq nsight-compute 2>/dev/null; then
   echo "--- ncu: gpu_absdiff (cupy) ---"
-  ncu --target-processes all --csv --log-file out/ncu_gpu.csv \
+  ncu --target-processes all --csv --log-file "$OUT/ncu_gpu.csv" \
       --launch-skip 8 --launch-count 24 \
       --section SpeedOfLight --section Occupancy \
       python3 -c "
@@ -40,7 +40,7 @@ for t in range(1, F//2):
     _ = float(dg[rg].astype(cp.float64).mean())
 " 2>&1 | tail -2 || true
   echo "--- ncu: farneback ---"
-  mkdir -p out/ncu_out && cp out/cv_scores.npz out/ncu_out/
+  mkdir -p "$OUT/ncu_out" && cp "$OUT/cv_scores.npz" "$OUT/ncu_out/"
   ncu --target-processes all --csv --log-file "$OUT/ncu_far.csv" \
       --launch-skip 8 --launch-count 24 \
       --section SpeedOfLight --section Occupancy \
