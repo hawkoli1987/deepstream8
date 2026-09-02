@@ -1,0 +1,9 @@
+# build/run artifacts — kept on disk, not in git (regenerable by src/)
+/runs/
+/data/
+__pycache__/
+*.pyc
+*.onnx
+*.engine
+*.so
+*.o

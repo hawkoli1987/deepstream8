@@ -1,0 +1,41 @@
+# throughput-test PGIE (nvinfer) config — YOLO26m ONNX, COCO-80
+# Rendered by make_pgie_config.py from src/templates/pgie_yolo26m.txt.tmpl.
+# Placeholders: @ONNX@ @ENGINE@ @BATCH@ @LABELS@ @PARSE_FUNC@ @PARSER_LIB@ @CLUSTER_MODE@
+# Derived from deepstream9/tools/yolo_deepstream/deepstream_yolo/config_infer_primary_yoloV11.txt
+# (Apache-2.0); precision is FP16 (network-mode=2) for every engine we build.
+
+[property]
+gpu-id=0
+net-scale-factor=0.0039215697906911373
+#0=RGB, 1=BGR
+model-color-format=0
+onnx-file=@ONNX@
+infer-dims=3;640;640
+batch-size=@BATCH@
+model-engine-file=@ENGINE@
+labelfile-path=@LABELS@
+## 0=FP32, 1=INT8, 2=FP16
+network-mode=2
+num-detected-classes=80
+gie-unique-id=1
+network-type=0
+## 1=DBSCAN, 2=NMS, 3=DBSCAN+NMS Hybrid, 4=None(No clustering)
+cluster-mode=@CLUSTER_MODE@
+maintain-aspect-ratio=1
+symmetric-padding=1
+## Bilinear
+scaling-filter=1
+parse-bbox-func-name=@PARSE_FUNC@
+disable-output-host-copy=0
+custom-lib-path=@PARSER_LIB@
+crop-objects-to-roi-boundary=1
+## every frame
+interval=0
+
+[class-attrs-all]
+# Used by the parser/clusterer. With cluster-mode=4 (e2e YOLO26) the score
+# threshold is the only knob that matters; with cluster-mode=2 (Plan B raw
+# head) nms-iou-threshold and topk also apply.
+nms-iou-threshold=0.65
+pre-cluster-threshold=0.25
+topk=300

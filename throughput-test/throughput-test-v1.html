@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>throughput-test — DeepStream batch-size sweep</title>
+<style>
+  /* ---- tokens (dataviz reference palette; validated 3 slots, both modes) ---- */
+  :root {
+    color-scheme: light dark;
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+    --good: #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+      --good: #0ca30c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px 10px;
+  }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .kpi .label { font-size: 12px; color: var(--text-secondary); }
+  .kpi .value { font-size: 26px; font-weight: 600; }
+  .kpi .hint  { font-size: 11px; color: var(--text-muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid);
+           font-variant-numeric: tabular-nums; }
+  th { color: var(--text-secondary); font-weight: 600; }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+  .status-ok { color: var(--good); }
+  .status-fail { color: var(--text-secondary); }
+  .failbox { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+             padding: 12px 16px; margin-bottom: 16px; }
+  .failbox ul { margin: 6px 0 0; padding-left: 18px; }
+  .note { color: var(--text-muted); font-size: 12px; }
+  .method { color: var(--text-secondary); font-size: 13px; }
+  .method code { background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+                 padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  footer { margin-top: 28px; color: var(--text-muted); font-size: 12px; }
+  .tooltip {
+    position: fixed; pointer-events: none; display: none; z-index: 10;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; color: var(--text-primary);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18); white-space: nowrap;
+  }
+  .tooltip .t-label { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>throughput-test — DeepStream YOLO26m + NvDCF batch-size sweep</h1>
+  <p class="sub" id="meta-line"></p>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="cards" id="charts"></div>
+
+  <h2 style="margin-top:22px">Failed points</h2>
+  <div class="failbox" id="failures"><span class="note">none — every swept N produced a measurement</span></div>
+
+  <h2 style="margin-top:22px">All points (table view)</h2>
+  <div class="card" style="padding:8px 12px">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>N</th><th>status</th><th>fps total</th><th>fps / stream</th>
+          <th>ms / batch</th><th>GPU %</th><th>W</th><th>MB</th>
+          <th>engine build s</th><th>exit</th><th>note</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <p class="method" id="method"></p>
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const DATA = {
+ "meta": {
+  "tag": "t4-smoke",
+  "gpu": "Tesla T4",
+  "driver": "595.91.07",
+  "ds": "8.0",
+  "generated_at": "2026-09-02T10:35:30Z",
+  "warmup_s": 5.0,
+  "measure_s": 15.0,
+  "pgie_note": "A / engine=per-n",
+  "sources_note": "in-container sample_720p.mp4, file-loop",
+  "notes": [],
+  "runs": [
+   {
+    "N": 1,
+    "status": "ok",
+    "dir": "N1"
+   },
+   {
+    "N": 4,
+    "status": "ok",
+    "dir": "N4"
+   }
+  ]
+ },
+ "points": [
+  {
+   "N": 1,
+   "status": "ok",
+   "exit_code": 0,
+   "fps_total": 35.13311832099144,
+   "fps_per_stream": 35.13311832099144,
+   "ms_per_batch": 28.463172294117626,
+   "sm_pct_mean": 19.6,
+   "power_w_mean": 39.806000000000004,
+   "mem_mb_max": 508.0,
+   "engine_build_s": 0.0,
+   "note": "A / engine=per-n"
+  },
+  {
+   "N": 4,
+   "status": "ok",
+   "exit_code": 0,
+   "fps_total": 223.99884365823593,
+   "fps_per_stream": 55.99971091455898,
+   "ms_per_batch": 17.857235040476194,
+   "sm_pct_mean": 100.0,
+   "power_w_mean": 68.75266666666667,
+   "mem_mb_max": 956.0,
+   "engine_build_s": 0.0,
+   "note": "A / engine=per-n"
+  }
+ ]
+};
+
+/* ---------------- helpers ---------------- */
+const fmt = (v, d = 1) => (v == null || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
+const okPoints = DATA.points.filter(p => p.status === "ok");
+
+/* ---------------- meta + KPI tiles ---------------- */
+const m = DATA.meta || {};
+document.getElementById("meta-line").textContent =
+  `${m.gpu || "?"} · driver ${m.driver || "?"} · DeepStream ${m.ds || "?"} · tag ${m.tag || "?"}` +
+  (m.generated_at ? ` · ${new Date(m.generated_at * 1000).toISOString()}` : "");
+
+const lastOk = okPoints[okPoints.length - 1];
+const best = okPoints.reduce((a, b) => (b.N > (a?.N ?? -1) ? b : a), null);
+const kpis = [
+  { label: "Streams sustained", value: lastOk ? lastOk.N : "—",
+    hint: lastOk ? `${fmt(lastOk.fps_per_stream)} fps/stream at highest measured N` : "" },
+  { label: "Total throughput", value: lastOk ? fmt(lastOk.fps_total) : "—",
+    hint: "frames/s at that N" },
+  { label: "Peak GPU load", value: okPoints.length ? fmt(Math.max(...okPoints.map(p => p.sm_pct_mean))) + "%" : "—",
+    hint: "mean SM utilisation across ok points" },
+  { label: "Efficiency", value: (lastOk && lastOk.power_w_mean)
+      ? fmt(lastOk.fps_total / lastOk.power_w_mean) + " fps/W" : "—",
+    hint: "total fps per watt at highest measured N" },
+];
+document.getElementById("kpis").innerHTML = kpis.map(k =>
+  `<div class="kpi"><div class="label">${k.label}</div><div class="value">${k.value}</div>` +
+  `<div class="hint">${k.hint}</div></div>`).join("");
+
+/* ---------------- line charts (SVG, crosshair tooltip) ---------------- */
+const CHARTS = [
+  { key: "fps_total",       title: "Total throughput vs streams",      unit: "fps" },
+  { key: "fps_per_stream",  title: "Per-stream fps vs streams",        unit: "fps" },
+  { key: "sm_pct_mean",     title: "GPU utilisation (mean SM %)",      unit: "%" },
+  { key: "power_w_mean",    title: "Board power (mean W)",             unit: "W"  },
+];
+const SERIES_COLORS = ["var(--s1)", "var(--s2)", "var(--s3)"];  // validated slots 1–3
+const tooltip = document.createElement("div");
+tooltip.className = "tooltip";
+document.body.appendChild(tooltip);
+
+function niceTicks(max) {
+  if (!max || !isFinite(max)) max = 1;
+  const raw = max / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s * 4 >= max) || mag * 10;
+  const ticks = [];
+  for (let v = 0; v <= max * 1.06; v += step) ticks.push(v);
+  return ticks;
+}
+
+function lineChart(chart, points, seriesNames, colorIdx) {
+  // points: array of ok point objects (this run). seriesNames: which keys make series.
+  // One series when single run; series = runs when DATA.meta.runs[] present.
+  const W = 520, H = 260, ML = 46, MR = 12, MT = 10, MB = 30;
+  const iw = W - ML - MR, ih = H - MT - MB;
+  const xs = points.map(p => p.N);
+  const xIndex = [...new Set(xs)].sort((a, b) => a - b);   // ordinal x: equal spacing per swept N
+  const xPix = n => ML + (xIndex.indexOf(n) / Math.max(1, xIndex.length - 1)) * iw;
+  const vals = points.map(p => p[chart.key]).filter(v => v != null);
+  const ticks = niceTicks(Math.max(...vals, 0));
+  const yMax = ticks[ticks.length - 1];
+  const yPix = v => MT + ih - (v / yMax) * ih;
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" role="img" aria-label="${chart.title}">`;
+  // gridlines + y ticks
+  for (const t of ticks) {
+    s += `<line x1="${ML}" x2="${W - MR}" y1="${yPix(t)}" y2="${yPix(t)}" stroke="var(--grid)" stroke-width="1"/>`;
+    s += `<text x="${ML - 6}" y="${yPix(t) + 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">${t >= 1000 ? (t / 1000) + "k" : t}</text>`;
+  }
+  // x labels
+  for (const n of xIndex) {
+    s += `<text x="${xPix(n)}" y="${H - 10}" text-anchor="middle" font-size="11" fill="var(--text-muted)">${n}</text>`;
+  }
+  s += `<line x1="${ML}" x2="${W - MR}" y1="${MT + ih}" y2="${MT + ih}" stroke="var(--axis)" stroke-width="1"/>`;
+  s += `<text x="${ML + iw / 2}" y="${H - 0}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">number of sources N</text>`;
+  // series
+  const series = seriesNames.length > 1
+    ? seriesNames.map((name, i) => ({ name, color: SERIES_COLORS[colorIdx + i],
+        pts: points.filter(p => p.run === name) }))
+    : [{ name: chart.title, color: SERIES_COLORS[colorIdx], pts: points }];
+  for (const ser of series) {
+    const pp = ser.pts.filter(p => p[chart.key] != null);
+    if (!pp.length) continue;
+    const d = pp.map((p, i) => `${i ? "L" : "M"}${xPix(p.N).toFixed(1)},${yPix(p[chart.key]).toFixed(1)}`).join(" ");
+    s += `<path d="${d}" fill="none" stroke="${ser.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    for (const p of pp) {
+      s += `<circle cx="${xPix(p.N).toFixed(1)}" cy="${yPix(p[chart.key]).toFixed(1)}" r="4.5" fill="${ser.color}" stroke="var(--surface-1)" stroke-width="2"/>`;
+    }
+  }
+  // hover: nearest-x crosshair
+  const chartIdx = document.querySelectorAll(".card svg").length;
+  s += `<rect id="hit${chartIdx}" x="${ML}" y="${MT}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  s += `</svg>`;
+  return { svg: s, xIndex, yPix, chart, points, seriesNames, chartIdx,
+           geom: { ML, MT, iw, ih, W, H, MR } };
+}
+
+const chartsHost = document.getElementById("charts");
+const runs = (m.runs && m.runs.length > 1) ? m.runs : null;
+CHARTS.forEach((chart, ci) => {
+  const card = document.createElement("div");
+  card.className = "card";
+  const legend = runs ? `<div class="note" style="margin-bottom:4px">${
+    runs.map((r, i) => `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;` +
+      `background:${SERIES_COLORS[i % 3]};margin:0 4px 0 10px"></span>${r}`).join("")}</div>` : "";
+  card.innerHTML = `<h2>${chart.title}</h2>${legend}`;
+  const res = lineChart(chart, okPoints, runs || ["run"], 0);
+  card.innerHTML += res.svg;
+  chartsHost.appendChild(card);
+  attachHover(res);
+});
+
+function attachHover(res) {
+  const svg = document.querySelectorAll(".card svg")[res.chartIdx];
+  const hit = svg.querySelector("rect[id^=hit]");
+  const xs = [...new Set(res.points.map(p => p.N))].sort((a, b) => a - b);
+  hit.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect();
+    const scale = res.geom.W / r.width;
+    const mx = (ev.clientX - r.left) * scale;
+    let bestN = null, bestD = 1e9;
+    for (const n of xs) {
+      const px = res.geom.ML + (xs.indexOf(n) / Math.max(1, xs.length - 1)) * res.geom.iw;
+      const d = Math.abs(px - mx);
+      if (d < bestD) { bestD = d; bestN = n; }
+    }
+    const pts = res.points.filter(p => p.N === bestN);
+    tooltip.style.display = "block";
+    tooltip.innerHTML = `<b>N=${bestN}</b><br>` + pts.map(p =>
+      `<span class="t-label">${res.chart.title.split(" vs ")[0]}:</span> ` +
+      `${fmt(p[res.chart.key], p[res.chart.key] < 10 ? 2 : 1)}${p.status !== "ok" ? " (" + p.status + ")" : ""}`
+    ).join("<br>");
+    tooltip.style.left = Math.min(ev.clientX + 14, window.innerWidth - 220) + "px";
+    tooltip.style.top = (ev.clientY + 12) + "px";
+  });
+  hit.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+}
+
+/* ---------------- failures + table ---------------- */
+const failed = DATA.points.filter(p => p.status !== "ok");
+if (failed.length) {
+  document.getElementById("failures").innerHTML =
+    `<ul>${failed.map(p => `<li><b>N=${p.N}</b> — ${p.status}${p.note ? `: ${p.note}` : ""}` +
+      `${p.exit_code ? ` (exit ${p.exit_code})` : ""}</li>`).join("")}</ul>`;
+}
+
+const tb = document.querySelector("#tbl tbody");
+tb.innerHTML = DATA.points.map(p => {
+  const cls = p.status === "ok" ? "status-ok" : "status-fail";
+  const v = (k, d = 1) => p[k] == null ? "—" : Number(p[k]).toFixed(d);
+  return `<tr><td>${p.N}</td><td class="${cls}">${p.status}</td><td>${v("fps_total")}</td>` +
+    `<td>${v("fps_per_stream")}</td><td>${v("ms_per_batch", 2)}</td><td>${v("sm_pct_mean")}</td>` +
+    `<td>${v("power_w_mean")}</td><td>${v("mem_mb_max", 0)}</td><td>${v("engine_build_s", 0)}</td>` +
+    `<td>${p.exit_code ?? "—"}</td><td>${p.note || ""}</td></tr>`;
+}).join("");
+
+document.getElementById("method").innerHTML =
+  `<b>Method.</b> N nvurisrcbin sources (${m.sources_note || "looped file, file-loop=1, num-extra-surfaces=32"}) → ` +
+  `nvstreammux 1920×1080 (batch-size=N, live-source=0, batched-push-timeout=45000 µs, attach-sys-ts=1) → ` +
+  `nvinfer YOLO26m (${m.pgie_note || "FP16, interval=0, cluster-mode=4, batch-size=N"}) → ` +
+  `vehicle filter probe (keep COCO 2/3/5/7 → class 0) → nvtracker NvDCF 960×544 → fakesink. ` +
+  `Warmup ${m.warmup_s ?? "?"} s, measure ${m.measure_s ?? "?"} s per point; GPU sampled at 1 Hz and epoch-bracketed. ` +
+  (m.notes || []);
+document.getElementById("footer").textContent =
+  `generated by throughput-test/src/build_html.py · schema ${DATA.schema || "v1"} · do not hand-edit`;
+</script>
+</body>
+</html>

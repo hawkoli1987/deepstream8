@@ -1,0 +1,15 @@
+# throughput-test fallback NvDCF tracker ll-config (YAML).
+# PRIMARY path is to copy the in-container preset
+#   /opt/nvidia/deepstream/deepstream/samples/configs/deepstream-app/config_tracker_NvDCF_perf.yml
+# and patch the three locked keys (they already match this preset). This minimal
+# template is only used if that file is missing in the image; NvDCF applies
+# built-in defaults for keys not listed.
+#
+# Locked values (user spec):
+#   maxTargetsPerStream: 150
+#   maxShadowTrackingAge: 51
+#   visualTrackerType: 2   (NvDCF_VPI; use 1 = NvDCF legacy if VPI is absent)
+
+maxTargetsPerStream: 150
+maxShadowTrackingAge: 51
+visualTrackerType: 2
