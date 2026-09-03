@@ -1,0 +1,1458 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finding the truly-still frames — NvOF stillness study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+
+<style>
+  :root{
+    --bg:#0F1113; --panel:#16191E; --panel-2:#1D222A; --edge:#2B323B;
+    --ink:#E4E6E3; --dim:#868E98; --faint:#545C66;
+    --nvof:#BE7BF0;
+    --bad:#E24A4F;      /* motion mislabelled static — the costly error */
+    --opp:#F0B34A;      /* static mislabelled motion — the cheap error */
+    --ok-mo:#2FD08A;    /* correct motion  */
+    --ok-st:#3C4650;    /* correct static (throttled) */
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --col: 720px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; padding:40px 20px 96px;
+  }
+  .wrap{max-width:var(--col); margin:0 auto}
+
+  .status{
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--dim);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding-bottom:18px; border-bottom:1px solid var(--edge);
+  }
+  .rec{width:7px;height:7px;border-radius:50%;background:var(--nvof);
+    box-shadow:0 0 0 0 rgba(190,123,240,.5); animation:pulse 2.4s ease-out infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(190,123,240,.45)}70%{box-shadow:0 0 0 7px rgba(190,123,240,0)}100%{box-shadow:0 0 0 0 rgba(190,123,240,0)}}
+  @media (prefers-reduced-motion:reduce){ .rec{animation:none} }
+  .status .sep{color:var(--faint)}
+
+  h1{
+    font-family:var(--mono); font-weight:600; font-size:29px; line-height:1.15;
+    letter-spacing:-.01em; text-wrap:balance; margin:26px 0 12px;
+  }
+  .dek{color:var(--dim); font-size:14.5px; max-width:64ch}
+  .dek b{color:var(--ink); font-weight:500}
+
+  section{margin-top:40px}
+  h2.sec{
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--dim); margin-bottom:14px; padding-top:20px; border-top:1px solid var(--edge);
+  }
+  h3{font-family:var(--mono); font-size:13px; color:var(--ink); margin:18px 0 6px; font-weight:500}
+  p.body{color:var(--dim); font-size:13.5px; max-width:66ch; margin-bottom:9px}
+  p.body b{color:var(--ink); font-weight:500}
+  code{font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--panel-2); padding:1px 5px; border-radius:3px}
+
+  .card{
+    margin:16px 0; padding:13px 15px; background:var(--panel);
+    border:1px solid var(--edge); border-radius:3px;
+  }
+  .card .k{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint)}
+
+  /* control groups — chip buttons */
+  .ctl{display:flex; gap:6px; margin:10px 0; flex-wrap:wrap; align-items:center}
+  .ctl .lab{font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--faint); margin-right:4px}
+  .ctl button{
+    font-family:var(--mono); font-size:11px; letter-spacing:.04em; text-transform:lowercase;
+    color:var(--dim); background:var(--panel); border:1px solid var(--edge); border-radius:3px;
+    padding:5px 9px; cursor:pointer; transition:color .15s,border-color .15s,background .15s;
+  }
+  .ctl button:hover{color:var(--ink); border-color:var(--faint)}
+  .ctl button[aria-pressed="true"]{color:var(--ink); border-color:var(--nvof); background:var(--panel-2)}
+  .ctl button:disabled{opacity:.32; cursor:not-allowed}
+  .ctl button:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+
+  .sliders{display:flex; flex-wrap:wrap; gap:18px 26px; margin:12px 0 4px}
+  .slider{display:flex; flex-direction:column; gap:4px; min-width:180px; flex:1}
+  .slider[hidden]{display:none}
+  .slider label{font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; color:var(--dim)}
+  .slider label b{color:var(--nvof); font-weight:600; font-variant-numeric:tabular-nums}
+  .slider input[type=range]{width:100%; accent-color:var(--nvof)}
+
+  /* stage */
+  .stage{
+    position:relative; width:100%; background:#000; margin-top:12px;
+    border:1px solid var(--edge); border-radius:3px; overflow:hidden; line-height:0; cursor:pointer;
+  }
+  .stage video{width:100%; height:auto; display:block}
+  .stage canvas{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+  .stage .hint{
+    position:absolute; left:10px; bottom:9px; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:.12em; text-transform:uppercase; color:rgba(228,230,227,.55);
+    pointer-events:none; transition:opacity .3s;
+  }
+  .stage.touched .hint,.stage.loading .hint{opacity:0}
+  .stage .loadmsg{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--dim); background:#000;
+  }
+  .stage.loading .loadmsg{display:flex}
+  .stage .loadmsg::after{
+    content:""; width:24px; height:24px; margin-left:12px; border-radius:50%;
+    border:2px solid var(--edge); border-top-color:var(--nvof); animation:spin .9s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .stage .loadmsg::after{animation:none} }
+
+  .speedbar{display:flex; gap:6px; margin:8px 0 2px; flex-wrap:wrap; align-items:center}
+  .speedbar .lab{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-right:2px}
+  .speedbar button{font-family:var(--mono); font-size:10.5px; color:var(--dim);
+    background:var(--panel); border:1px solid var(--edge); border-radius:3px; padding:4px 8px; cursor:pointer}
+  .speedbar button[aria-pressed="true"]{color:var(--ink); border-color:var(--nvof); background:var(--panel-2)}
+
+  .scrub{position:relative; height:24px; margin:6px 0 2px; cursor:ew-resize; touch-action:none}
+  .scrub .rail{position:absolute; left:0; right:0; top:10px; height:3px; background:var(--edge); border-radius:2px}
+  .scrub .fill{position:absolute; left:0; top:10px; height:3px; background:var(--faint); border-radius:2px}
+  .scrub .tick{position:absolute; top:5px; width:2px; height:13px; margin-left:-1px; background:var(--nvof);
+    border-radius:1px; box-shadow:0 0 6px rgba(190,123,240,.7)}
+  .scrub:focus-visible{outline:2px solid var(--ink); outline-offset:3px; border-radius:3px}
+
+  .deck{position:relative}
+  .playhead{position:absolute; top:0; bottom:0; width:1px; margin-left:-.5px; background:var(--nvof);
+    pointer-events:none; z-index:6; box-shadow:0 0 7px rgba(190,123,240,.55)}
+  .playhead::after{content:""; position:absolute; top:0; left:-3px; width:7px; height:7px;
+    background:var(--nvof); clip-path:polygon(50% 100%,0 0,100% 0)}
+
+  .plotwrap{border:1px solid var(--edge); background:var(--panel); border-radius:3px; margin-top:8px}
+  .plot{display:block; width:100%; height:120px}
+  .swimhdr{display:flex; gap:14px; align-items:baseline; padding:8px 12px 0; font-family:var(--mono); font-size:10.5px; color:var(--dim)}
+  .swim{display:block; width:100%; height:16px; margin-top:4px}
+  .swimlabels{display:flex; justify-content:space-between; padding:2px 12px 9px; font-family:var(--mono); font-size:9.5px; color:var(--faint)}
+
+  .legend{display:flex; gap:14px; margin:10px 2px 0; font-family:var(--mono);
+    font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); flex-wrap:wrap}
+  .legend span{display:flex; align-items:center; gap:6px}
+  .legend i{width:10px; height:10px; border-radius:2px; display:inline-block}
+
+  /* metric chips */
+  .chips{display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin:14px 0}
+  .chip{border:1px solid var(--edge); border-radius:3px; background:var(--panel); padding:9px 10px; text-align:center}
+  .chip .cv{font-family:var(--mono); font-size:19px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; display:block}
+  .chip .cl{font-family:var(--mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); display:block; margin-top:2px}
+  .chip.bad .cv{color:var(--bad)} .chip.opp .cv{color:var(--opp)}
+  @media (max-width:620px){ .chips{grid-template-columns:repeat(3,1fr)} }
+
+  /* small multiples */
+  .sm-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:12px 0}
+  .sm-cell{border:1px solid var(--edge); border-radius:3px; background:var(--panel); padding:8px}
+  .sm-cell h4{font-family:var(--mono); font-size:10.5px; color:var(--ink); font-weight:500; margin-bottom:1px}
+  .sm-cell .tag{font-family:var(--mono); font-size:8.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--faint)}
+  .sm-cell .tag.same{color:var(--ok-mo)}
+  .sm-cell svg{display:block; width:100%; height:52px; margin-top:4px}
+  .sm-cell .num{font-family:var(--mono); font-size:9.5px; color:var(--dim); margin-top:3px; font-variant-numeric:tabular-nums}
+  @media (max-width:620px){ .sm-grid{grid-template-columns:repeat(2,1fr)} }
+
+  /* method cards */
+  .methods{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0}
+  .method{border:1px solid var(--edge); border-left-width:2px; border-left-color:var(--nvof);
+    border-radius:3px; padding:10px 12px; font-size:12px; color:var(--dim)}
+  .method b{font-family:var(--mono); font-size:11px; color:var(--ink); display:block; margin-bottom:2px}
+  .method .cls{font-family:var(--mono); font-size:8.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); display:block; margin-bottom:4px}
+  .method .ex{display:block; margin-top:5px; color:var(--ink); font-size:11.5px}
+  @media (max-width:620px){ .methods{grid-template-columns:1fr} }
+
+  /* tables */
+  .tw{overflow-x:auto; margin:12px 0}
+  table.mt{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px}
+  table.mt th{font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);
+    text-align:right; padding:6px 7px; border-bottom:1px solid var(--edge); font-weight:500; white-space:nowrap}
+  table.mt th:first-child{text-align:left}
+  table.mt td{padding:6px 7px; border-bottom:1px solid var(--edge); color:var(--dim);
+    text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+  table.mt td:first-child{text-align:left; color:var(--ink)}
+  table.mt tr:last-child td{border-bottom:none}
+  table.mt tr.hi td{background:rgba(190,123,240,.08)}
+  table.mt td.bad{color:var(--bad)} table.mt td.win{color:var(--ok-mo)}
+
+  .verdict{border:1px solid var(--edge); border-left:2px solid var(--ok-mo); border-radius:3px;
+    background:var(--panel); padding:14px 16px; margin:14px 0; font-size:13px; color:var(--dim)}
+  .verdict b{color:var(--ink)}
+  .verdict p{margin:6px 0}
+
+  .simstrip{border:1px solid var(--edge); border-radius:3px; background:var(--panel); padding:12px; margin-top:10px}
+  .simbar{display:block; width:100%; height:22px}
+  .simmeta{display:flex; gap:20px; flex-wrap:wrap; margin-top:8px; font-family:var(--mono); font-size:11px; color:var(--dim)}
+  .simmeta b{color:var(--ink); font-variant-numeric:tabular-nums}
+
+  .events-list{font-family:var(--mono); font-size:11px; color:var(--dim); margin:8px 0}
+  .events-list div{padding:3px 0}
+  .events-list .id{color:var(--nvof); font-weight:600}
+
+  .keys{margin-top:10px; font-family:var(--mono); font-size:10px; color:var(--faint); letter-spacing:.04em}
+  .keys kbd{font:inherit; color:var(--dim); background:var(--panel-2); border:1px solid var(--edge);
+    border-radius:3px; padding:1px 5px; margin:0 2px}
+  footer{margin-top:44px; border-top:1px solid var(--edge); padding-top:20px;
+    font-family:var(--mono); font-size:10px; color:var(--faint); letter-spacing:.04em; line-height:1.9}
+
+  @media (max-width:600px){
+    body{padding:28px 14px 72px} h1{font-size:23px}
+  }
+
+  /* ===== readability restyle — appended last, so these rules win ===== */
+  :root{
+    --ink:#EDEFF2; --body:#B7BFC9; --dim:#8A94A0; --faint:#5C6570;
+    --col:880px; --ok-mo:#2FE0A6; --ok-st:#4A5663;
+  }
+  body{font-size:15.5px; line-height:1.65; padding:36px 20px 96px}
+  h1{font-size:30px; line-height:1.2}
+  .dek{color:var(--body); font-size:15.5px; max-width:70ch}
+  h2.sec{color:var(--ink); font-size:12.5px}
+  h2.sec .n{color:var(--nvof); margin-right:8px}
+  h3{font-size:14px; margin:22px 0 8px}
+  p.body{color:var(--body); font-size:15px; max-width:72ch; margin-bottom:10px}
+  code{font-size:13px}
+  .card .k{color:var(--faint)}
+  .ctl{margin:12px 0 4px}
+  .ctl .lab{font-size:11px}
+  .ctl button{font-size:12px; color:var(--body); padding:6px 11px}
+  .slider label{font-size:12px; color:var(--ink)}
+  .slider .hint{font-family:var(--sans); font-size:12.5px; color:var(--dim); line-height:1.45}
+  .speedbar button{font-size:11px; color:var(--body)}
+  .plotwrap{margin-top:10px}
+  .plot{height:130px}
+  .plotcap{padding:8px 12px 0; font-family:var(--mono); font-size:11px; color:var(--dim)}
+  .swimhdr{font-size:11.5px; color:var(--dim); padding:9px 12px 2px; gap:18px; flex-wrap:wrap; align-items:baseline}
+  .swimhdr b{color:var(--ink); text-transform:none}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:2px; margin:0 5px 0 10px}
+  .swim{height:18px}
+  .swimlabels{font-size:10.5px}
+  .legend{font-family:var(--sans); font-size:12.5px; color:var(--body); gap:18px; align-items:center; text-transform:none; letter-spacing:0}
+  .legend i{width:11px; height:11px}
+  .chips{grid-template-columns:repeat(6,1fr); gap:10px; margin:16px 0 8px}
+  .chip{padding:11px 10px 9px}
+  .chip .cv{font-family:var(--sans); font-size:24px; font-weight:600; line-height:1.15}
+  .chip .cl{font-family:var(--sans); font-size:11px; line-height:1.4; letter-spacing:0; text-transform:none; color:var(--dim); display:flex; align-items:center; justify-content:center; gap:6px; margin-top:4px}
+  .chip .cl i{width:8px; height:8px; border-radius:2px; flex:none; display:inline-block}
+  .sm-grid{gap:12px; margin:14px 0}
+  .sm-cell{padding:10px}
+  .sm-cell h4{font-size:12px}
+  .sm-cell .tag{font-family:var(--sans); font-size:11px; color:var(--dim); display:block; min-height:16px; text-transform:none; letter-spacing:0}
+  .sm-cell .tag.same{color:var(--ok-mo)}
+  .sm-cell svg{height:64px; margin-top:5px}
+  .sm-cell .num{font-size:10.5px; line-height:1.55; margin-top:5px}
+  .sm-cell .num b{color:var(--ink); font-weight:500}
+  .methods{gap:12px}
+  .method{font-size:13.5px; line-height:1.55}
+  .method b{font-size:12.5px}
+  .method .cls{font-size:10px; letter-spacing:.08em}
+  .method .ex{font-size:12.5px; margin-top:7px}
+  table.mt{font-size:11.5px}
+  table.mt th{font-size:10px; letter-spacing:.06em; color:var(--dim); padding:7px 8px}
+  table.mt td{padding:7px 8px; color:var(--body)}
+  table.mt td.bad{color:var(--bad)}
+  .verdict{font-size:14.5px; padding:16px 18px}
+  .simmeta{font-family:var(--sans); font-size:13.5px; gap:24px}
+  .simbar{height:26px}
+  .events-list{font-size:12.5px; color:var(--body)}
+  .events-list .enote{color:var(--faint)}
+  .keys{font-family:var(--sans); font-size:12.5px; color:var(--faint)}
+  footer{font-size:11px}
+
+  /* new components */
+  .toc{
+    position:sticky; top:0; z-index:40; margin:22px -8px 0;
+    display:flex; gap:2px; flex-wrap:wrap;
+    background:rgba(15,17,19,.93); backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--edge); padding:4px 8px;
+  }
+  .toc a{
+    font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--dim); text-decoration:none; padding:7px 10px; border-radius:3px;
+  }
+  .toc a:hover{color:var(--ink); background:var(--panel-2)}
+  section{scroll-margin-top:64px}
+
+  .note{
+    border-left:3px solid var(--nvof); background:var(--panel);
+    padding:12px 16px; margin:14px 0; font-size:14px; color:var(--body); border-radius:0 3px 3px 0;
+  }
+  .note .k{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--faint); margin-bottom:5px}
+  .note b{color:var(--ink); font-weight:500}
+
+  .tldr{
+    border:1px solid var(--edge); border-left:3px solid var(--ok-mo);
+    background:var(--panel); border-radius:3px; padding:18px 20px; margin:20px 0 8px;
+  }
+  .tldr .k{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--faint); margin-bottom:10px}
+  .tldr ul{list-style:none}
+  .tldr li{color:var(--body); font-size:15.5px; padding:7px 0 7px 26px; position:relative; border-bottom:1px solid var(--edge)}
+  .tldr li:last-child{border-bottom:none}
+  .tldr li::before{content:"→"; position:absolute; left:2px; color:var(--ok-mo); font-family:var(--mono)}
+  .tldr b{color:var(--ink); font-weight:600}
+  .tldr .big{font-size:20px}
+  .gl-row{display:grid; grid-template-columns:210px 1fr; gap:14px; padding:8px 0; border-bottom:1px solid var(--edge); font-size:13.5px}
+  .gl-row:last-child{border-bottom:none}
+  .gl-row dt{color:var(--ink); font-weight:500}
+  .gl-row dd{color:var(--dim)}
+  @media (max-width:640px){ .gl-row{grid-template-columns:1fr; gap:2px} }
+  .rulehelp{border:1px solid var(--edge); border-radius:3px; background:var(--panel); padding:4px 16px; margin:10px 0 4px}
+  .rulehelp .rh{display:grid; grid-template-columns:110px 1fr; gap:12px; padding:8px 0; border-bottom:1px solid var(--edge); font-size:13px}
+  .rulehelp .rh:last-child{border-bottom:none}
+  .rulehelp .rh b{font-family:var(--mono); font-size:12px; color:var(--nvof); font-weight:500}
+  .rulehelp .rh span{color:var(--dim)}
+  .rulehelp .rh.current b{color:var(--ink)}
+  .rulehelp .rh.current span{color:var(--body)}
+  @media (max-width:560px){ .rulehelp .rh{grid-template-columns:1fr; gap:1px} }
+  .ctl-hint{font-size:13px; color:var(--dim); margin:2px 0 10px; max-width:70ch}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="status">
+      <span class="rec"></span>
+      <span>nvof stillness study</span><span class="sep">/</span>
+      <span id="s-clip">clip3</span><span class="sep">/</span>
+      <span id="s-frames">– frames</span><span class="sep">/</span>
+      <span>NvOFA lane only</span><span class="sep">/</span>
+      <span>Tesla T4</span>
+    </div>
+
+    <h1>Finding the truly-still frames &mdash; does the rescaling matter, or just where the line is drawn?</h1>
+    <p class="dek">
+      One foggy-night street clip. One motion sensor: the GPU's optical-flow unit, which reports
+      <b>how many pixels of movement</b> each frame shows. The question is narrow and practical:
+      which stretches of video are <b>truly static</b>, so a camera pipeline could drop to a low
+      framerate there and save compute? This page tries <b>8 ways of reshaping those scores</b>
+      &times; <b>5 rules for drawing the motion/static line</b>, scored against <b>167 frames
+      labelled by hand</b>. One asymmetry drives everything: calling a moving frame STATIC means
+      a person or car could go unrecorded (<b>BAD</b>); calling a still frame MOTION only wastes
+      compute (<b>cheap</b>).
+    </p>
+
+    <nav class="toc" aria-label="Sections">
+      <a href="#p1">1 &middot; the test</a>
+      <a href="#p2">2 &middot; rescalings</a>
+      <a href="#p3">3 &middot; try it</a>
+      <a href="#p4">4 &middot; scoreboard</a>
+      <a href="#p5">5 &middot; the payoff</a>
+    </nav>
+
+    <div class="tldr">
+      <span class="k">the short answer &mdash; at the default 10 : 1 error weighting</span>
+      <ul>
+        <li><b>Where you draw the line matters ~15&times; more than how the scores are reshaped.</b>
+          The v3 report's automatic line drops <b class="big" id="t-bad-raw">--</b> of the
+          <span id="t-nmot">--</span> real-motion frames; the best possible line drops
+          <b class="big" id="t-bad-opt">--</b>.</li>
+        <li><b>The quiet winner needs no tuning:</b> replace each score by its rank ("ECDF") and keep
+          the same automatic line &mdash; <b class="big" id="t-bad-ecdf">--</b> dropped frames, cost
+          <b id="t-cost-ecdf">--</b>, never looking at the labels.</li>
+        <li><b>One event is a sensing limit, not a tuning failure:</b> headlights approaching
+          head-on through fog barely move pixels, so their score sits at the noise level and no
+          line placement catches them cheaply.</li>
+      </ul>
+    </div>
+
+    <h3>Words this page uses</h3>
+    <dl class="card" id="glossary">
+      <div class="gl-row"><dt>motion score</dt><dd>how many pixels of movement the flow sensor saw in that frame, on average (0 = perfectly still).</dd></div>
+      <div class="gl-row"><dt>aggregation</dt><dd>turning a frame's grid of 880 flow numbers into one score: <b>mean</b> &middot; <b>max</b> (busiest region) &middot; <b>top-4</b> (average of the 4 busiest regions).</dd></div>
+      <div class="gl-row"><dt>reshaping (normalization)</dt><dd>stretching, squashing or rank-replacing the scores before the line is drawn. Adds no information &mdash; but it can move where an automatic rule puts its line.</dd></div>
+      <div class="gl-row"><dt>threshold rule</dt><dd>the recipe that turns scores into MOTION / STATIC labels &mdash; from "find the histogram valley" to a framerate thermostat.</dd></div>
+      <div class="gl-row"><dt>BAD / OPP</dt><dd>the two errors: <b>BAD</b> = real motion labelled STATIC (a person or car could go unrecorded); <b>OPP</b> = truly-still frame kept at full speed (only wasted compute, nothing missed).</dd></div>
+      <div class="gl-row"><dt>cost</dt><dd>one number per configuration: C<sub>bad</sub>&middot;BAD + C<sub>opp</sub>&middot;OPP, by default 10&middot;BAD + 1&middot;OPP. Lower is better.</dd></div>
+      <div class="gl-row"><dt>ground truth</dt><dd>all 167 frames labelled by eye from numbered contact sheets &mdash; 4 motion events (E1&ndash;E4), everything else static.</dd></div>
+      <div class="gl-row"><dt>Otsu line</dt><dd>a classic automatic cutoff: find the deepest valley in the score histogram and cut there. No parameters to set.</dd></div>
+      <div class="gl-row"><dt>ECDF (rank)</dt><dd>replace every score by its percentile among the frames &mdash; only the ordering survives.</dd></div>
+      <div class="gl-row"><dt>throttled / duty</dt><dd>the share of frames a schedule would run at low framerate (that is the compute saved).</dd></div>
+    </dl>
+  </header>
+
+  <!-- ============ 1 · SETUP ============ -->
+  <section id="p1">
+    <h2 class="sec"><span class="n">1</span> The test &mdash; what counts as an error, and what is forgivable</h2>
+    <p class="body" id="setup-obj"></p>
+
+    <div class="card">
+      <span class="k">ground truth — labelled by eye from numbered contact sheets, not the detector</span>
+      <div class="events-list" id="events-list"></div>
+      <p class="body" id="labels-note" style="margin-top:6px; font-size:12px"></p>
+    </div>
+
+    <p class="body"><b>The error weighting is yours to set.</b> Every "cost" on this page is
+      C<sub>bad</sub>&middot;BAD + C<sub>opp</sub>&middot;OPP; drag to change how much worse a
+      dropped event is than wasted compute.</p>
+    <div class="sliders">
+      <div class="slider">
+        <label>dropped event : wasted frame &nbsp;=&nbsp; <b id="cr-val">10</b> : 1</label>
+        <div class="hint">Drag toward 50 if you think missing a person is far worse than wasting compute; at 1 the two count equally.</div>
+        <input id="cr" type="range" min="1" max="50" step="1" value="10">
+      </div>
+    </div>
+    <p class="body" id="setup-ceiling" style="font-size:13.5px"></p>
+  </section>
+
+  <!-- ============ 2 · NORMALIZATIONS ============ -->
+  <section id="p2">
+    <h2 class="sec"><span class="n">2</span> Eight ways to reshape the scores &mdash; four change nothing, one changes everything</h2>
+    <div class="note">
+      <span class="k">how to read these panels</span>
+      Each panel is the same <span id="sm-n">166</span> frames under a different reshaping
+      (mean aggregation), plotted on a common 1st-99th-percentile display scale so they are
+      comparable. The purple line is the score; green shading marks the hand-labelled motion
+      events; the dashed line is where Otsu's automatic rule cuts. A <b>same result as raw</b>
+      badge means the reshaping provably cannot change the outcome &mdash; for any rule.
+    </div>
+
+    <div class="ctl" id="agg-ctl-2">
+      <span class="lab">aggregation</span>
+      <button data-agg="mean" aria-pressed="true">mean</button>
+      <button data-agg="max" aria-pressed="false">max</button>
+      <button data-agg="top4" aria-pressed="false">top-4 cells</button>
+    </div>
+    <div class="ctl-hint">How a frame's grid of 880 flow numbers becomes one score:
+      <b>mean</b> = average over the whole frame &middot; <b>max</b> = the single busiest
+      region &middot; <b>top-4</b> = average of the 4 busiest regions (kindest to small,
+      distant movers).</div>
+
+    <div class="sm-grid" id="sm-grid"></div>
+    <div class="legend">
+      <span><i style="background:var(--nvof)"></i>score</span>
+      <span><i style="background:var(--ok-mo);opacity:.45"></i>hand-labelled motion</span>
+      <span><i style="background:var(--dim)"></i>Otsu's automatic cut</span>
+    </div>
+
+    <h3>What each reshaping does to the decision</h3>
+    <div class="methods" id="norm-methods"></div>
+  </section>
+
+  <!-- ============ 3 · TUNING BENCH ============ -->
+  <section id="p3">
+    <h2 class="sec"><span class="n">3</span> Try it yourself &mdash; pick a reshaping and a rule, watch every label change</h2>
+    <div class="note">
+      <span class="k">what am I looking at</span>
+      Chips and sliders below re-run the whole analysis instantly. The purple overlay on the video
+      is the raw flow data &mdash; <em>where</em> the sensor sees movement (it never changes). The
+      score plot shows the reshaped score per frame with the rule's cut; the coloured strip under
+      it shows how every frame is labelled: grey/green = correct, <b>red = a dropped event</b>,
+      amber = merely wasteful.
+    </div>
+
+    <div class="ctl" id="agg-ctl-3">
+      <span class="lab">aggregation</span>
+      <button data-agg="mean" aria-pressed="true">mean</button>
+      <button data-agg="max" aria-pressed="false">max</button>
+      <button data-agg="top4" aria-pressed="false">top-4 cells</button>
+    </div>
+    <div class="ctl-hint">Same choices as section 2 &mdash; mean is the v3 baseline; top-4 is kindest to distant movers.</div>
+    <div class="ctl" id="norm-ctl">
+      <span class="lab">reshaping</span>
+    </div>
+    <div class="ctl-hint">Reshaping never adds information &mdash; it changes where some automatic rules place their line.</div>
+    <div class="ctl" id="rule-ctl">
+      <span class="lab">threshold rule</span>
+      <button data-rule="otsu" aria-pressed="true">otsu</button>
+      <button data-rule="quantile" aria-pressed="false">quantile(q)</button>
+      <button data-rule="fixedraw" aria-pressed="false">fixed-raw</button>
+      <button data-rule="costopt" aria-pressed="false">cost-opt</button>
+      <button data-rule="hysteresis" aria-pressed="false">hysteresis</button>
+    </div>
+    <div class="rulehelp" id="rule-help"></div>
+
+    <div class="sliders">
+      <div class="slider" id="sl-q" hidden>
+        <label>quantile q = <b id="q-val">0.50</b></label>
+        <div class="hint">The busiest share of frames count as motion; drag right to demand more movement before a frame is called MOTION.</div>
+        <input id="q" type="range" min="0.02" max="0.98" step="0.01" value="0.5">
+      </div>
+      <div class="slider" id="sl-raw" hidden>
+        <label>raw cut = <b id="raw-val">–</b> px of flow</label>
+        <div class="hint">Frames averaging more than this many pixels of flow count as motion.</div>
+        <input id="raw" type="range" min="0" max="100" step="1" value="20">
+      </div>
+      <div class="slider" id="sl-thi" hidden>
+        <label>T<sub>hi</sub> (resume full speed) = <b id="thi-val">0.40</b></label>
+        <div class="hint">Any frame scoring above this snaps the pipeline back to full speed immediately.</div>
+        <input id="thi" type="range" min="0.02" max="1" step="0.01" value="0.4">
+      </div>
+      <div class="slider" id="sl-tlo" hidden>
+        <label>T<sub>lo</sub> (start throttling) = <b id="tlo-val">0.24</b></label>
+        <div class="hint">A frame scoring below this starts the throttle countdown.</div>
+        <input id="tlo" type="range" min="0.01" max="1" step="0.01" value="0.24">
+      </div>
+      <div class="slider" id="sl-dmin" hidden>
+        <label>calm frames before throttle d = <b id="dmin-val">2</b></label>
+        <div class="hint">This many consecutive calm frames are needed before the framerate drops — the anti-flap lag.</div>
+        <input id="dmin" type="range" min="1" max="12" step="1" value="2">
+      </div>
+    </div>
+
+    <div class="deck" id="deck">
+      <div class="stage loading" id="stage">
+        <video id="vid" playsinline muted preload="auto"></video>
+        <canvas id="ov"></canvas>
+        <span class="hint">click or space to play</span>
+        <div class="loadmsg" id="loadmsg">decoding clip&hellip;</div>
+      </div>
+
+      <div class="speedbar" id="speedbar">
+        <span class="lab">speed</span>
+        <button data-rate="0.1" aria-pressed="false">0.1&times;</button>
+        <button data-rate="0.25" aria-pressed="false">0.25&times;</button>
+        <button data-rate="0.5" aria-pressed="false">0.5&times;</button>
+        <button data-rate="1" aria-pressed="true">1&times;</button>
+        <button data-rate="2" aria-pressed="false">2&times;</button>
+      </div>
+
+      <div class="scrub" id="scrub" tabindex="0" role="slider" aria-label="Frame" aria-valuemin="0" aria-valuenow="0">
+        <div class="rail"></div><div class="fill" id="fill"></div><div class="tick" id="tick"></div>
+      </div>
+
+      <div class="plotwrap">
+        <div class="plotcap">score per frame &mdash; reshaped the way you chose, with the rule's cut</div>
+        <svg class="plot" id="bench-plot" preserveAspectRatio="none"></svg>
+        <div class="swimhdr">
+          <span>rule says <i class="dot" id="bp-ldot"></i><b id="bp-label" style="color:var(--ink)">–</b></span>
+          <span>hand truth <i class="dot" id="bp-tdot"></i><b id="bp-truth" style="color:var(--ink)">–</b></span>
+          <span id="bp-score" style="margin-left:auto"></span>
+        </div>
+        <svg class="swim" id="bench-swim" viewBox="0 0 100 1" preserveAspectRatio="none"></svg>
+        <div class="swimlabels"><span>frame 0</span><span id="sw-end">–</span></div>
+      </div>
+
+      <div class="playhead" id="playhead"></div>
+    </div>
+
+    <div class="legend">
+      <span><i style="background:var(--ok-st)"></i>correct STATIC — throttled</span>
+      <span><i style="background:var(--ok-mo)"></i>correct MOTION — full speed</span>
+      <span><i style="background:var(--bad)"></i>BAD — real motion dropped</span>
+      <span><i style="background:var(--opp)"></i>OPP — static kept at full speed</span>
+    </div>
+    <div class="keys">
+      <kbd>space</kbd> play/pause &nbsp; <kbd>&larr;</kbd><kbd>&rarr;</kbd> step frame-by-frame &nbsp; drag the timeline or the plot to scrub
+    </div>
+
+    <div class="chips" id="chips"></div>
+    <p class="body" id="bench-vs-v3" style="font-size:12px"></p>
+  </section>
+
+  <!-- ============ 4 · EVALUATION ============ -->
+  <section id="p4">
+    <h2 class="sec"><span class="n">4</span> Scoreboard &mdash; every reshaping, at the error weighting you chose</h2>
+    <div class="note">
+      <span class="k">how to read the curve</span>
+      Each point answers: <b>"if the line were drawn at this height, what would the total cost be?"</b>
+      Low is good. The bold curve is your selected reshaping; the faint one is the raw scores.
+      The amber dot is where Otsu's automatic rule lands; the green dot is the best possible
+      placement (it reads the hand labels); the red dot is the v3 report's published operating point.
+    </div>
+    <div class="plotwrap"><svg class="plot" id="cost-curve" style="height:160px" preserveAspectRatio="none"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--nvof)"></i>selected reshaping</span>
+      <span><i style="background:var(--faint)"></i>raw scores</span>
+      <span><i style="background:var(--opp)"></i>Otsu's cut</span>
+      <span><i style="background:var(--ok-mo)"></i>best possible cut</span>
+      <span><i style="background:var(--bad)"></i>v3 published point</span>
+    </div>
+
+    <h3>Every reshaping on the current aggregation, under Otsu's automatic rule</h3>
+    <div class="tw"><table class="mt" id="eval-table"></table></div>
+    <p class="body" style="font-size:13px">
+      Cost = C<sub>bad</sub>&middot;BAD + OPP at your weighting. The <b>highlighted row</b> is the
+      reshaping selected in section 3; <b>green cost</b> = best on this clip. "Best possible" is the
+      exhaustive search that reads the hand labels &mdash; the floor no line placement can beat. It
+      shows how much headroom the automatic rules leave.
+    </p>
+
+    <h3>Bottom line</h3>
+    <div class="verdict" id="verdict"></div>
+  </section>
+
+  <!-- ============ 5 · THROTTLE SIMULATION ============ -->
+  <section id="p5">
+    <h2 class="sec"><span class="n">5</span> The payoff &mdash; the framerate schedule your settings would run</h2>
+    <p class="body">
+      The still segments the current rule produces, as a schedule: full speed (8&nbsp;fps) where it
+      says MOTION, throttled to <span id="sim-lowfps">2</span>&nbsp;fps where it says STATIC.
+      Red ticks are hand-labelled motion frames the schedule would sleep through &mdash;
+      <b>that number is the one to keep at zero</b>.
+    </p>
+    <div class="simstrip">
+      <svg class="simbar" id="sim-bar" viewBox="0 0 100 1" preserveAspectRatio="none"></svg>
+      <div class="simmeta" id="sim-meta"></div>
+    </div>
+    <div class="legend" style="margin-top:10px">
+      <span><i style="background:var(--nvof)"></i>full speed</span>
+      <span><i style="background:var(--ok-st)"></i>throttled</span>
+      <span><i style="background:var(--bad)"></i>motion frame slept through</span>
+    </div>
+    <div class="ctl">
+      <span class="lab">throttled fps</span>
+      <button data-lf="1" aria-pressed="false">1</button>
+      <button data-lf="2" aria-pressed="true">2</button>
+      <button data-lf="4" aria-pressed="false">4</button>
+    </div>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function(){
+  "use strict";
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var V = D.video, F = V.frame_count, FPS = V.fps;
+  var GW = D.grid.cols, GH = D.grid.rows, NC = GW * GH;
+  var NV = D.nvof, LAB = D.labels, EV = D.events;
+  var CSS = getComputedStyle(document.documentElement);
+  var COL = {};
+  ["nvof","bad","opp","ok-mo","ok-st","edge","faint","dim","ink","panel-2"].forEach(function(n){
+    COL[n] = CSS.getPropertyValue("--"+n).trim();
+  });
+
+  // ---------- decode cells (px flow magnitude per 40x22 grid cell) ----------
+  function b64bytes(s){
+    var bin = atob(s), n = bin.length, a = new Uint8Array(n);
+    for (var i=0;i<n;i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+  var HEAT = b64bytes(NV.heat_b64);
+  var P99 = NV.heat_p99;
+  var VALID = NV.valid;
+  var VIDX = []; for (var i=0;i<F;i++) if (VALID[i]) VIDX.push(i);
+  var NVAL = VIDX.length;
+
+  function cellPx(f){
+    var out = new Float64Array(NC), base = f*NC;
+    for (var p=0;p<NC;p++) out[p] = HEAT[base+p] / 255 * P99;
+    return out;
+  }
+  var CELLS = []; for (var f=0;f<F;f++) CELLS.push(VALID[f] ? cellPx(f) : null);
+
+  // per-cell temporal p99 for the "percell" normalization
+  var CELL_P99 = (function(){
+    var arr = new Float64Array(NC);
+    for (var p=0;p<NC;p++){
+      var col = [];
+      for (var j=0;j<VIDX.length;j++) col.push(CELLS[VIDX[j]][p]);
+      arr[p] = pctl(col, 0.99) || 1e-12;
+    }
+    return arr;
+  })();
+
+  // ---------- stats helpers (mirror build_study_data.py) ----------
+  function pctl(xs, q){
+    if (!xs.length) return 0;
+    var s = xs.slice().sort(function(a,b){return a-b;});
+    var k = (s.length-1)*q, lo = Math.floor(k), hi = Math.ceil(k);
+    if (lo===hi) return s[lo];
+    return s[lo] + (s[hi]-s[lo])*(k-lo);
+  }
+  function mean(xs){ var t=0; for(var i=0;i<xs.length;i++) t+=xs[i]; return t/xs.length; }
+  function top4mean(arr){
+    // arr is Float64Array; get 4 largest
+    var a = Array.prototype.slice.call(arr).sort(function(x,y){return y-x;});
+    return (a[0]+a[1]+a[2]+a[3])/4;
+  }
+
+  // ---------- aggregation ----------
+  function aggregateSeries(agg){
+    var out = new Array(F).fill(null);
+    for (var n=0;n<VIDX.length;n++){
+      var f = VIDX[n];
+      if (agg==="mean") out[f] = NV.raw_px[f];
+      else if (agg==="max"){ var m=0, c=CELLS[f]; for (var p=0;p<NC;p++) if(c[p]>m) m=c[p]; out[f]=m; }
+      else if (agg==="top4") out[f] = top4mean(CELLS[f]);
+    }
+    return out;
+  }
+  function percellSeries(agg){
+    var out = new Array(F).fill(null);
+    for (var n=0;n<VIDX.length;n++){
+      var f = VIDX[n], c = CELLS[f], nc = new Float64Array(NC);
+      for (var p=0;p<NC;p++) nc[p] = Math.min(1, c[p]/CELL_P99[p]);
+      if (agg==="mean"){ var t=0; for (var q=0;q<NC;q++) t+=nc[q]; out[f]=t/NC; }
+      else if (agg==="max"){ var m=0; for (var q2=0;q2<NC;q2++) if(nc[q2]>m) m=nc[q2]; out[f]=m; }
+      else out[f] = top4mean(nc);
+    }
+    return out;
+  }
+
+  // ---------- normalization ----------
+  var NORM_META = {
+    identity:      {label:"raw (no change)",  desc:"the scores as measured",        cls:"affine",  grp:"A"},
+    minmax:        {label:"min-max",          desc:"same shape, stretched 0-1",     cls:"affine",  grp:"A"},
+    z:             {label:"z-score",          desc:"same shape, centered",          cls:"affine",  grp:"A"},
+    robustz:       {label:"robust z",         desc:"same shape, centered robustly", cls:"affine",  grp:"A"},
+    log1p:         {label:"log-squashed",     desc:"big spikes pulled in",          cls:"monotone",grp:"L"},
+    log1p_robustz: {label:"log + robust z",   desc:"squashed, then centered",       cls:"monotone",grp:"L"},
+    ecdf:          {label:"rank (ECDF)",      desc:"only the ranking survives",     cls:"rank",    grp:"E"},
+    percell:       {label:"per-region p99",   desc:"each region by its own past",   cls:"spatial", grp:"P"}
+  };
+  function transform(base, norm){
+    var out = new Array(F).fill(null), n, f;
+    if (norm==="identity"||norm==="minmax"||norm==="z"||norm==="robustz"){
+      for (n=0;n<VIDX.length;n++){ f=VIDX[n]; out[f]=base[f]; }
+    } else if (norm==="log1p"||norm==="log1p_robustz"){
+      for (n=0;n<VIDX.length;n++){ f=VIDX[n]; out[f]=Math.log1p(base[f]); }
+    } else if (norm==="ecdf"){
+      var v = VIDX.map(function(g){return base[g];});
+      for (n=0;n<VIDX.length;n++){
+        f=VIDX[n]; var x=base[f], cnt=0;
+        for (var j=0;j<v.length;j++) if (v[j]<=x) cnt++;
+        out[f] = v.length>1 ? (cnt-1)/(v.length-1) : 0;
+      }
+    }
+    return out;
+  }
+  function displayScale(series){
+    var v = VIDX.map(function(f){return series[f];});
+    var lo = pctl(v,0.01), hi = pctl(v,0.99);
+    if (hi<=lo) hi = lo + 1e-12;
+    var S = new Array(F).fill(null);
+    for (var n=0;n<VIDX.length;n++){
+      var f=VIDX[n];
+      S[f] = Math.min(1, Math.max(0, (series[f]-lo)/(hi-lo)));
+    }
+    return {S:S, lo:lo, hi:hi};
+  }
+  // cache: keyed by agg|norm -> {S, native}
+  var SCACHE = {};
+  function getScaled(agg, norm){
+    var key = agg+"|"+norm;
+    if (SCACHE[key]) return SCACHE[key];
+    var native = (norm==="percell") ? percellSeries(agg) : aggregateSeries(agg);
+    var base = (norm==="percell") ? native : transform(aggregateSeries(agg), norm);
+    var ds = displayScale(base);
+    var r = {S:ds.S, lo:ds.lo, hi:ds.hi, native:native};
+    SCACHE[key] = r;
+    return r;
+  }
+
+  // ---------- thresholds ----------
+  function otsu(S){
+    var bins=256, h=new Array(bins).fill(0), xs=VIDX.map(function(f){return S[f];});
+    xs.forEach(function(x){ h[Math.min(bins-1, Math.floor(x*bins))]++; });
+    var tot=xs.length, p=h.map(function(c){return c/tot;});
+    var ctr=[]; for (var i=0;i<bins;i++) ctr.push((i+0.5)/bins);
+    var muT=0; for (i=0;i<bins;i++) muT += p[i]*ctr[i];
+    var w0=0, cum=0, bk=0, bv=-1;
+    for (var k=0;k<bins;k++){
+      w0+=p[k]; cum+=p[k]*ctr[k]; var w1=1-w0;
+      if (w0<=0||w1<=0) continue;
+      var sb=(muT*w0-cum)*(muT*w0-cum)/(w0*w1);
+      if (sb>bv){ bv=sb; bk=k; }
+    }
+    var varT=0; for (i=0;i<bins;i++) varT += p[i]*(ctr[i]-muT)*(ctr[i]-muT);
+    return {thr:ctr[bk], eta: varT>0 ? bv/varT : 0};
+  }
+  function predFromCut(S, thr){
+    var pr = {};
+    for (var n=0;n<VIDX.length;n++){ var f=VIDX[n]; pr[f] = S[f] >= thr; }
+    return pr;
+  }
+  function predFixedRaw(native, cut){
+    var pr = {};
+    for (var n=0;n<VIDX.length;n++){ var f=VIDX[n]; pr[f] = native[f] >= cut; }
+    return pr;
+  }
+  function predHysteresis(S, Thi, Tlo, dmin){
+    // causal state machine over valid frames in order.
+    // motion (full-rate) is the safe default; enter throttle after dmin
+    // consecutive still frames; leave the instant S >= Thi.
+    var pr = {}, throttling=false, run=0;
+    for (var n=0;n<VIDX.length;n++){
+      var f=VIDX[n], s=S[f];
+      if (throttling){
+        if (s >= Thi){ throttling=false; run=0; }
+      } else {
+        if (s < Tlo){ run++; if (run>=dmin) throttling=true; }
+        else run=0;
+      }
+      pr[f] = !throttling;   // true = labelled motion / keep full rate
+    }
+    return pr;
+  }
+  function costOptCut(S, cbad, copp){
+    var vals = VIDX.map(function(f){return S[f];}).sort(function(a,b){return a-b;});
+    var cuts=[0];
+    for (var i=0;i<vals.length-1;i++) cuts.push((vals[i]+vals[i+1])/2);
+    cuts.push(1.0001);
+    var bt=0, bc=Infinity;
+    for (var c=0;c<cuts.length;c++){
+      var m = scorePred(predFromCut(S, cuts[c]), cbad, copp);
+      if (m.cost < bc){ bc=m.cost; bt=cuts[c]; }
+    }
+    return bt;
+  }
+
+  // ---------- scoring ----------
+  function scorePred(pr, cbad, copp){
+    var bad=0, opp=0, run=0, lbad=0, seg=0, instill=false, throttled=0;
+    for (var n=0;n<VIDX.length;n++){
+      var f=VIDX[n], mot=pr[f], truth=LAB[f];
+      if (truth===1 && !mot){ bad++; run++; if (run>lbad) lbad=run; } else run=0;
+      if (truth===0 && mot) opp++;
+      var still = !mot;
+      if (still && !instill) seg++;
+      instill = still;
+      if (still) throttled++;
+    }
+    return {bad:bad, opp:opp, longest_bad:lbad, segments:seg,
+            duty: throttled/NVAL, cost: cbad*bad + copp*opp};
+  }
+  function eventRecall(pr){
+    return EV.map(function(e){
+      var hit=false;
+      for (var f=e.f0; f<=e.f1; f++) if (VALID[f] && pr[f]) hit=true;
+      return {id:e.id, hit:hit};
+    });
+  }
+
+  // ---------- current config ----------
+  var cfg = {agg:"mean", norm:"identity", rule:"otsu",
+             q:0.5, rawFrac:0.2, thi:0.40, tlo:0.24, dmin:2,
+             cbad:10, copp:1, lowfps:2};
+
+  function currentThreshold(){
+    var sc = getScaled(cfg.agg, cfg.norm);
+    var S = sc.S, native = sc.native, out = {S:S, native:native, kind:cfg.rule};
+    if (cfg.rule==="otsu"){ var o=otsu(S); out.thr=o.thr; out.eta=o.eta; out.pred=predFromCut(S,o.thr); }
+    else if (cfg.rule==="quantile"){ out.thr=pctl(VIDX.map(function(f){return S[f];}), cfg.q); out.pred=predFromCut(S,out.thr); }
+    else if (cfg.rule==="fixedraw"){
+      var nv = VIDX.map(function(f){return native[f];});
+      var cut = pctl(nv,0.02) + cfg.rawFrac*(pctl(nv,0.98)-pctl(nv,0.02));
+      out.rawCut = cut; out.pred = predFixedRaw(native, cut);
+      // map cut into S space for the plot line
+      out.thr = null;
+    }
+    else if (cfg.rule==="costopt"){ out.thr=costOptCut(S, cfg.cbad, cfg.copp); out.pred=predFromCut(S,out.thr); }
+    else if (cfg.rule==="hysteresis"){ out.thrHi=cfg.thi; out.thrLo=cfg.tlo; out.pred=predHysteresis(S,cfg.thi,cfg.tlo,cfg.dmin); }
+    return out;
+  }
+
+  // =======================================================================
+  //  PANEL 1 — setup
+  // =======================================================================
+  document.getElementById("s-frames").textContent = F + " frames";
+  document.getElementById("s-clip").textContent = V.file.replace(".mp4","");
+  document.getElementById("setup-obj").textContent = D.objective;
+  document.getElementById("labels-note").textContent = D.labels_note;
+  document.getElementById("sw-end").textContent = "frame " + (F-1);
+  (function(){
+    var el = document.getElementById("events-list");
+    EV.forEach(function(e){
+      var d = document.createElement("div");
+      d.innerHTML = '<span class="id">'+e.id+'</span> &nbsp;frames '+e.f0+'–'+e.f1
+        +' &nbsp;('+ (e.f0/FPS).toFixed(1) +'–'+ (e.f1/FPS).toFixed(1) +' s) &nbsp;· '+e.name
+        +' <span style="color:var(--faint)">— '+e.note+'</span>';
+      el.appendChild(d);
+    });
+    var nmot=0; VIDX.forEach(function(f){ if (LAB[f]===1) nmot++; });
+    document.getElementById("setup-ceiling").innerHTML =
+      "<b style='color:var(--ink)'>"+NVAL+"</b> valid frames (frame 0 has no flow): "
+      + "<b style='color:var(--ink)'>"+nmot+"</b> motion, <b style='color:var(--ink)'>"+(NVAL-nmot)+"</b> static "
+      + "→ the best any schedule can throttle is <b style='color:var(--ink)'>"+((NVAL-nmot)/NVAL*100).toFixed(0)+"%</b> of the clip.";
+  })();
+  document.getElementById("cr").addEventListener("input", function(){
+    cfg.cbad = +this.value;
+    document.getElementById("cr-val").textContent = cfg.cbad;
+    renderAll();
+  });
+
+  // headline numbers for the TLDR box + section-2 frame count
+  (function(){
+    function cell(ag,nm){ return D.reference.grid.filter(function(r){return r.agg===ag&&r.norm===nm;})[0]; }
+    var idO = cell("mean","identity").otsu, ecO = cell("mean","ecdf").otsu;
+    var meanRows = D.reference.grid.filter(function(r){return r.agg==="mean";});
+    var optBad = Math.min.apply(null, meanRows.map(function(r){return r.cost_opt.bad;}));
+    document.getElementById("t-bad-raw").textContent = idO.bad;
+    document.getElementById("t-nmot").textContent = VIDX.filter(function(f){return LAB[f]===1;}).length;
+    document.getElementById("t-bad-opt").textContent = optBad;
+    document.getElementById("t-bad-ecdf").textContent = ecO.bad;
+    document.getElementById("t-cost-ecdf").textContent = cfg.cbad*ecO.bad + ecO.opp;
+    document.getElementById("sm-n").textContent = NVAL;
+  })();
+
+  // =======================================================================
+  //  PANEL 2 — small multiples + method cards
+  // =======================================================================
+  var agg2 = "mean";
+  function drawSmallMultiples(){
+    var host = document.getElementById("sm-grid"); host.innerHTML = "";
+    var affRef = JSON.stringify(getScaled(agg2,"identity").S.map(function(x){return x==null?null:+x.toFixed(4);}));
+    D.norms.forEach(function(norm){
+      var sc = getScaled(agg2, norm), S = sc.S, o = otsu(S);
+      var pr = predFromCut(S, o.thr), m = scorePred(pr, cfg.cbad, cfg.copp);
+      var same = norm!=="identity" &&
+                 JSON.stringify(S.map(function(x){return x==null?null:+x.toFixed(4);}))===affRef;
+      var meta = NORM_META[norm];
+      var cell = document.createElement("div"); cell.className="sm-cell";
+      var svg = miniPlot(S, o.thr);
+      var calledMoving = NVAL - Math.round(m.duty*NVAL);
+      cell.innerHTML = '<h4>'+meta.label+'</h4>'
+        + '<span class="tag '+(same?"same":"")+'">'+(same?"same result as raw":meta.desc)+'</span>'
+        + svg
+        + '<span class="num">auto line '+o.thr.toFixed(2)+' · calls '+calledMoving+' frames moving'
+        + '<br>misses <b>'+m.bad+'</b> real-motion frames · cost '+(cfg.cbad*m.bad+m.opp)+'</span>';
+      host.appendChild(cell);
+    });
+  }
+  function miniPlot(S, thr){
+    var W=200,H=52, y=function(v){return H-4-v*(H-8);};
+    var pts=[];
+    for (var n=0;n<VIDX.length;n++){ var f=VIDX[n]; pts.push((f/(F-1)*W).toFixed(1)+","+y(S[f]).toFixed(1)); }
+    var shade="";
+    EV.forEach(function(e){
+      var x0=e.f0/(F-1)*W, x1=e.f1/(F-1)*W;
+      shade += '<rect x="'+x0.toFixed(1)+'" y="0" width="'+(x1-x0).toFixed(1)+'" height="'+H+'" fill="'+COL["ok-mo"]+'" fill-opacity="0.14"/>';
+    });
+    return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+      + shade
+      + '<line x1="0" y1="'+y(thr).toFixed(1)+'" x2="'+W+'" y2="'+y(thr).toFixed(1)+'" stroke="'+COL.dim+'" stroke-width="1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>'
+      + '<polyline points="'+pts.join(" ")+'" fill="none" stroke="'+COL.nvof+'" stroke-width="1.3" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>'
+      + '</svg>';
+  }
+
+  function drawNormMethods(){
+    var host = document.getElementById("norm-methods"); host.innerHTML="";
+    var ag = agg2;
+    function ref(norm){
+      return D.reference.grid.filter(function(r){return r.agg===ag && r.norm===norm;})[0];
+    }
+    var aff = ref("identity"), log = ref("log1p"), ec = ref("ecdf"), pc = ref("percell");
+    var cards = [
+      ["Stretching changes nothing", "identity \u00b7 min-max \u00b7 z \u00b7 robust z",
+       "These four only shift and stretch the numbers. They never change how far apart two frames "
+       +"sit, so Otsu's valley, any percentile cut and the best possible line all land in exactly "
+       +"the same place \u2014 all four panels above are identical.",
+       "Otsu's line lands at "+aff.otsu.threshold.toFixed(2)+"; "+aff.otsu.bad+" real-motion frames "
+       +"dropped, cost "+(cfg.cbad*aff.otsu.bad+aff.otsu.opp)+" \u2014 identical across all four."],
+      ["Log-squashing the spikes", "log1p \u00b7 log1p + robust z",
+       "Taking log(1+x) pulls the huge pedestrian and car spikes closer to the quiet crowd. Rules "
+       +"that only care about the order of frames (quantile, cost-opt) do not move; Otsu's valley "
+       +"does.",
+       "Otsu's line moves to "+log.otsu.threshold.toFixed(2)+": "+log.otsu.bad+" dropped vs "
+       +aff.otsu.bad+" for raw \u2014 "+(log.otsu.bad<aff.otsu.bad?"it helps":"barely moves")+", because "
+       +(ag==="mean"?"the valley still lands between the quiet crowd and the big spikes."
+                    :"it lifts small-mover frames above the noise.")],
+      ["Replace scores by their rank (ECDF)", "rank \u00b7 the quiet winner",
+       "Every frame's score becomes its percentile among frames. The histogram goes flat, so Otsu's "
+       +"valley-seek turns into a near-median split \u2014 and on this clip that sits right on the real "
+       +"still/motion boundary. It also lifts the fog-shrouded E4 headlights from noise level to "
+       +"about the 85th percentile, so the automatic rule catches them.",
+       "Otsu's line lands at "+ec.otsu.threshold.toFixed(2)+": "+ec.otsu.bad+" dropped, cost "
+       +(cfg.cbad*ec.otsu.bad+ec.otsu.opp)+" \u2014 near the tuned optimum, with zero tuning and no "
+       +"peeking at the labels."],
+      ["Scale each region by its own history", "per-region p99",
+       "Each of the 880 regions is divided by its own busy-ness over the clip, so a permanently "
+       +"warm spot (a bright lamp, a lit sign) cannot dominate the frame average. It re-orders "
+       +"frames, so every rule moves \u2014 including the best-possible line.",
+       "Otsu drops "+pc.otsu.bad+" frames; best-possible cost "
+       +(cfg.cbad*pc.cost_opt.bad+pc.cost_opt.opp)+" vs "
+       +(cfg.cbad*aff.cost_opt.bad+aff.cost_opt.opp)+" raw \u2014 "
+       +(pc.cost_opt.bad+pc.cost_opt.opp/cfg.cbad < aff.cost_opt.bad+aff.cost_opt.opp/cfg.cbad
+         ? "a small gain." : "no real gain here.")]
+    ];
+    cards.forEach(function(c){
+      var d=document.createElement("div"); d.className="method";
+      d.innerHTML='<b>'+c[0]+'</b><span class="cls">'+c[1]+'</span>'+c[2]
+        +'<span class="ex">This clip · '+ag+': '+c[3]+'</span>';
+      host.appendChild(d);
+    });
+  }
+
+  document.querySelectorAll("#agg-ctl-2 button").forEach(function(b){
+    b.addEventListener("click", function(){
+      agg2 = b.getAttribute("data-agg");
+      setPressed("#agg-ctl-2", b);
+      drawSmallMultiples(); drawNormMethods();
+    });
+  });
+
+  // =======================================================================
+  //  PANEL 3 — tuning bench (video + swimlane + chips)
+  // =======================================================================
+  var vid = document.getElementById("vid"), ov = document.getElementById("ov");
+  var octx = ov.getContext("2d"), stage = document.getElementById("stage");
+  var DATA_URI = "__VIDEO__";
+  (function(){
+    try {
+      var b = atob(DATA_URI.slice(DATA_URI.indexOf(",")+1));
+      var u8 = new Uint8Array(b.length);
+      for (var i=0;i<b.length;i++) u8[i]=b.charCodeAt(i);
+      vid.src = URL.createObjectURL(new Blob([u8], {type:"video/mp4"}));
+    } catch(e){ vid.src = DATA_URI; }
+  })();
+
+  var off = document.createElement("canvas"); off.width=GW; off.height=GH;
+  var offctx = off.getContext("2d"), offimg = offctx.createImageData(GW,GH);
+  var curFrame = -1;
+
+  function fitOverlay(){
+    var r = stage.getBoundingClientRect();
+    ov.width = Math.round(r.width); ov.height = Math.round(r.height);
+    drawOverlay();
+  }
+  window.addEventListener("resize", function(){ fitOverlay(); layoutPlots(); });
+
+  function drawOverlay(){
+    var f = Math.max(0, curFrame), base=f*NC, d=offimg.data;
+    var rgb = [190,123,240];
+    for (var p=0,qq=0;p<NC;p++,qq+=4){
+      d[qq]=rgb[0]; d[qq+1]=rgb[1]; d[qq+2]=rgb[2]; d[qq+3]=HEAT[base+p];
+    }
+    offctx.putImageData(offimg,0,0);
+    octx.clearRect(0,0,ov.width,ov.height);
+    octx.globalAlpha=0.7; octx.imageSmoothingEnabled=true;
+    octx.drawImage(off,0,0,ov.width,ov.height);
+    octx.globalAlpha=1;
+  }
+
+  // transport (adapted from street.html)
+  var playhead=document.getElementById("playhead"), deck=document.getElementById("deck");
+  var scrub=document.getElementById("scrub"), fill=document.getElementById("fill"), tick=document.getElementById("tick");
+  function frameToTime(f){ return (f+0.5)/FPS; }
+  function timeToFrame(t){ return Math.max(0, Math.min(F-1, Math.floor(t*FPS+1e-6))); }
+
+  var CUR = null;   // current threshold result
+
+  function render(f){
+    if (f===curFrame) return;
+    curFrame=f;
+    var pc=(f+0.5)/F*100;
+    playhead.style.left=pc+"%"; fill.style.width=pc+"%"; tick.style.left=pc+"%";
+    scrub.setAttribute("aria-valuenow", f);
+    var sc = getScaled(cfg.agg, cfg.norm);
+    document.getElementById("bp-truth").textContent = LAB[f]===1 ? "MOTION" : "STATIC";
+    document.getElementById("bp-tdot").style.background = LAB[f]===1 ? COL["ok-mo"] : COL["ok-st"];
+    var lblEl = document.getElementById("bp-label");
+    var ld = document.getElementById("bp-ldot");
+    if (!VALID[f]){
+      lblEl.textContent = "no data (frame 0)"; ld.style.background = "transparent";
+    } else {
+      var mot = CUR && CUR.pred[f], t = LAB[f]===1;
+      lblEl.textContent = mot ? "MOTION · full speed" : "STATIC · throttled";
+      ld.style.background = mot ? (t ? COL["ok-mo"] : COL.opp) : (t ? COL.bad : COL["ok-st"]);
+    }
+    document.getElementById("bp-score").innerHTML = VALID[f]
+      ? "score <b style='color:var(--ink)'>"+sc.S[f].toFixed(3)+"</b> &nbsp;·&nbsp; raw flow "+NV.raw_px[f].toFixed(2)+" px"
+      : "frame 0 — no flow yet";
+    drawOverlay();
+    movePlayLine(f);
+  }
+  function follow(){
+    render(timeToFrame(vid.currentTime));
+    if ("requestVideoFrameCallback" in vid) vid.requestVideoFrameCallback(follow);
+  }
+  if ("requestVideoFrameCallback" in vid) vid.requestVideoFrameCallback(follow);
+  else (function raf(){ render(timeToFrame(vid.currentTime)); requestAnimationFrame(raf); })();
+
+  function seekFrame(f){
+    f=Math.max(0,Math.min(F-1,f));
+    stage.classList.add("touched");
+    vid.currentTime=frameToTime(f); render(f);
+  }
+  function toggle(){ stage.classList.add("touched"); if (vid.paused) vid.play(); else vid.pause(); }
+  vid.addEventListener("ended", function(){ vid.currentTime=0; render(0); });
+  stage.addEventListener("click", toggle);
+  window.addEventListener("keydown", function(e){
+    if (e.key===" "||e.code==="Space"){ e.preventDefault(); toggle(); }
+    else if (e.key==="ArrowLeft"){ e.preventDefault(); vid.pause(); seekFrame(curFrame-1); }
+    else if (e.key==="ArrowRight"){ e.preventDefault(); vid.pause(); seekFrame(curFrame+1); }
+    else if (e.key==="Home"){ e.preventDefault(); vid.pause(); seekFrame(0); }
+    else if (e.key==="End"){ e.preventDefault(); vid.pause(); seekFrame(F-1); }
+  });
+  function scrubFromX(x){
+    var r=deck.getBoundingClientRect();
+    seekFrame(Math.round((x-r.left)/r.width*F - 0.5));
+  }
+  var dragging=false, wasPlaying=false;
+  function down(e){ dragging=true; wasPlaying=!vid.paused; vid.pause(); scrubFromX(e.clientX);
+    e.target.setPointerCapture&&e.target.setPointerCapture(e.pointerId); e.preventDefault(); }
+  function mv(e){ if (dragging) scrubFromX(e.clientX); }
+  function upp(){ if (dragging&&wasPlaying) vid.play(); dragging=false; }
+  [scrub, document.getElementById("bench-plot"), document.getElementById("bench-swim")].forEach(function(nd){
+    nd.addEventListener("pointerdown",down); nd.addEventListener("pointermove",mv);
+    nd.addEventListener("pointerup",upp); nd.addEventListener("pointercancel",upp);
+  });
+  var speedbar=document.getElementById("speedbar");
+  function setRate(r){
+    vid.playbackRate=r; vid.defaultPlaybackRate=r;
+    speedbar.querySelectorAll("button").forEach(function(b){
+      b.setAttribute("aria-pressed", parseFloat(b.getAttribute("data-rate"))===r ? "true":"false");
+    });
+  }
+  speedbar.addEventListener("click", function(e){
+    var b=e.target.closest("button"); if (b) setRate(parseFloat(b.getAttribute("data-rate")));
+  });
+  vid.addEventListener("loadeddata", function(){ stage.classList.remove("loading"); fitOverlay(); layoutPlots(); seekFrame(0); });
+  vid.addEventListener("error", function(){ document.getElementById("loadmsg").textContent="video failed to load"; });
+
+  // ---- bench plot + swimlane ----
+  var BP = document.getElementById("bench-plot"), BSW = document.getElementById("bench-swim");
+  var bpW = 720, bpH = 120;
+  function layoutPlots(){
+    bpW = BP.clientWidth || 720;
+    BP.setAttribute("viewBox","0 0 "+bpW+" "+bpH);
+    drawBench();
+  }
+  function xOf(f){ return f/(F-1)*bpW; }
+  function yOf(v){ return bpH-6 - v*(bpH-16); }
+
+  function drawBench(){
+    if (!CUR) return;
+    var S = CUR.S, ns = "http://www.w3.org/2000/svg", g = "";
+    // GT motion shading
+    EV.forEach(function(e){
+      g += '<rect x="'+xOf(e.f0).toFixed(1)+'" y="0" width="'+(xOf(e.f1)-xOf(e.f0)).toFixed(1)
+        +'" height="'+bpH+'" fill="'+COL["ok-mo"]+'" fill-opacity="0.12"/>';
+    });
+    // threshold line(s)
+    if (CUR.kind==="hysteresis"){
+      g += thrLine(CUR.thrHi, COL["ok-mo"], "T_hi");
+      g += thrLine(CUR.thrLo, COL.opp, "T_lo");
+    } else if (CUR.thr!=null){
+      g += thrLine(CUR.thr, COL.opp, "");
+    } else if (CUR.rawCut!=null){
+      // fixed-raw: map native cut -> S via nearest frame ratio (approx display)
+      var nv = VIDX.map(function(f){return CUR.native[f];}).sort(function(a,b){return a-b;});
+      var frac = nv.filter(function(x){return x<=CUR.rawCut;}).length/nv.length;
+      g += thrLine(frac, COL.opp, "raw");
+    }
+    // score polyline
+    var pts=[];
+    for (var n=0;n<VIDX.length;n++){ var f=VIDX[n]; pts.push(xOf(f).toFixed(1)+","+yOf(S[f]).toFixed(1)); }
+    g += '<polyline points="'+pts.join(" ")+'" fill="none" stroke="'+COL.nvof
+      +'" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>';
+    // playhead marker placeholder
+    g += '<line id="bp-ph" x1="0" y1="0" x2="0" y2="'+bpH+'" stroke="'+COL.nvof+'" stroke-width="1" vector-effect="non-scaling-stroke" opacity="0.5"/>';
+    BP.innerHTML = g;
+
+    // swimlane — error coloured
+    var sw="";
+    for (var m=0;m<VIDX.length;m++){
+      var fr=VIDX[m], mot=CUR.pred[fr], truth=LAB[fr], col, opac="0.9";
+      if (truth===1 && !mot){ col=COL.bad; }
+      else if (truth===0 && mot){ col=COL.opp; }
+      else if (truth===1 && mot){ col=COL["ok-mo"]; }
+      else { col=COL["ok-st"]; opac="0.65"; }
+      sw += '<rect x="'+(fr/F*100).toFixed(3)+'" y="0" width="'+(1.02/F*100).toFixed(3)
+        +'" height="1" fill="'+col+'" fill-opacity="'+opac+'"/>';
+    }
+    BSW.innerHTML = sw;
+  }
+  function thrLine(v, col, txt){
+    var y=yOf(v).toFixed(1);
+    return '<line x1="0" y1="'+y+'" x2="'+bpW+'" y2="'+y+'" stroke="'+col
+      +'" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>';
+  }
+  function movePlayLine(f){
+    var ph=document.getElementById("bp-ph");
+    if (ph){ var x=xOf(Math.max(0,f)); ph.setAttribute("x1",x); ph.setAttribute("x2",x); }
+  }
+
+  function drawChips(){
+    var m = scorePred(CUR.pred, cfg.cbad, cfg.copp);
+    var rec = eventRecall(CUR.pred).filter(function(r){return r.hit;}).map(function(r){return r.id;});
+    var host=document.getElementById("chips"); host.innerHTML="";
+    var rows = [
+      ["bad",  "motion frames dropped",            m.bad],
+      ["opp",  "static frames kept at full speed", m.opp],
+      ["",     "longest unbroken miss (frames)",   m.longest_bad],
+      ["",     "separate still stretches",         m.segments],
+      ["",     "% of clip throttled",              (m.duty*100).toFixed(0)],
+      ["",     "total cost (lower is better)",     m.cost]
+    ];
+    rows.forEach(function(c){
+      var d=document.createElement("div"); d.className="chip "+(c[0]||"");
+      var dot = c[0]==="bad" ? '<i style="background:var(--bad)"></i>'
+              : c[0]==="opp" ? '<i style="background:var(--opp)"></i>' : "";
+      d.innerHTML='<span class="cv">'+c[2]+'</span><span class="cl">'+dot+c[1]+'</span>';
+      host.appendChild(d);
+    });
+    var v3 = D.reference.v3;
+    document.getElementById("bench-vs-v3").innerHTML =
+      "of the four hand-labelled events, your settings flag <b style='color:var(--ink)'>"
+      + (rec.join(" ") || "none") + "</b> (" + EV.map(function(e){return e.id;}).join(" ") + ")"
+      + " &nbsp;·&nbsp; for contrast, the v3 report's operating point — raw scores with the Otsu line at "
+      + (+v3.threshold).toFixed(2) + " — drops <b style='color:var(--bad)'>" + v3.bad
+      + "</b> real-motion frames (longest unbroken miss <b style='color:var(--bad)'>"
+      + v3.longest_bad + "</b> frames) for a cost of " + (cfg.cbad*v3.bad+v3.opp) + ".";
+  }
+
+  // =======================================================================
+  //  PANEL 4 — evaluation
+  // =======================================================================
+  var CC = document.getElementById("cost-curve");
+  function drawCostCurve(){
+    var w = CC.clientWidth||720, h=150;
+    CC.setAttribute("viewBox","0 0 "+w+" "+h);
+    var scSel = getScaled(cfg.agg, cfg.norm), scAff = getScaled(cfg.agg, "identity");
+    var N=120, curveSel=[], curveAff=[], maxCost=1;
+    for (var i=0;i<=N;i++){
+      var t=i/N;
+      var cs=scorePred(predFromCut(scSel.S,t), cfg.cbad, cfg.copp).cost;
+      var ca=scorePred(predFromCut(scAff.S,t), cfg.cbad, cfg.copp).cost;
+      curveSel.push(cs); curveAff.push(ca);
+      if (cs>maxCost) maxCost=cs; if (ca>maxCost) maxCost=ca;
+    }
+    var x=function(t){return t*w;}, y=function(c){return h-6 - c/maxCost*(h-14);};
+    function poly(arr,col,wd,op){
+      var p=[]; for (var i=0;i<=N;i++) p.push((i/N*w).toFixed(1)+","+y(arr[i]).toFixed(1));
+      return '<polyline points="'+p.join(" ")+'" fill="none" stroke="'+col+'" stroke-width="'+wd
+        +'" vector-effect="non-scaling-stroke" opacity="'+op+'"/>';
+    }
+    var g = poly(curveAff, COL.faint, 1.2, "0.8") + poly(curveSel, COL.nvof, 1.8, "1");
+    // markers
+    var oSel = otsu(scSel.S).thr, coSel = costOptCut(scSel.S, cfg.cbad, cfg.copp);
+    function mark(S, t, col){
+      var cc=scorePred(predFromCut(S,t), cfg.cbad, cfg.copp).cost;
+      return '<circle cx="'+x(t).toFixed(1)+'" cy="'+y(cc).toFixed(1)+'" r="4" fill="'+col
+        +'" stroke="#0F1113" stroke-width="2"/>';
+    }
+    g += mark(scSel.S, oSel, COL.opp) + mark(scSel.S, coSel, COL["ok-mo"]);
+    // v3 operating point lives on the affine series at its 0.17 cut
+    g += mark(scAff.S, D.reference.v3.threshold, COL.bad);
+    // axis hints
+    g += '<text x="4" y="12" fill="'+COL.faint+'" font-family="monospace" font-size="9">cost — lower is better (peak here ≈ '+Math.round(maxCost)+')</text>';
+    g += '<text x="'+(w-4)+'" y="'+(h-4)+'" fill="'+COL.faint+'" font-family="monospace" font-size="9" text-anchor="end">line position 0 → 1</text>';
+    CC.innerHTML = g;
+  }
+
+  function drawEvalTable(){
+    var host=document.getElementById("eval-table");
+    var rows = D.reference.grid.filter(function(r){return r.agg===cfg.agg;});
+    var h = '<thead><tr><th>rescaling</th><th>Otsu line at</th><th>motion dropped (BAD)</th>'
+      + '<th>static kept (OPP)</th><th>longest miss</th><th>throttled</th><th>cost</th>'
+      + '<th>best possible</th><th>events caught</th></tr></thead><tbody>';
+    var best=Infinity;
+    rows.forEach(function(r){ var c=cfg.cbad*r.otsu.bad+r.otsu.opp; if (c<best) best=c; });
+    rows.forEach(function(r){
+      var c = cfg.cbad*r.otsu.bad + r.otsu.opp;
+      var coc = cfg.cbad*r.cost_opt.bad + r.cost_opt.opp;
+      var rec = r.otsu.recall.filter(function(x){return x.hit;}).map(function(x){return x.id;}).join("");
+      var hi = (r.norm===cfg.norm) ? ' class="hi"' : '';
+      h += '<tr'+hi+'><td>'+NORM_META[r.norm].label+'</td>'
+        + '<td>'+r.otsu.threshold.toFixed(2)+'</td>'
+        + '<td class="'+(r.otsu.bad>0?"bad":"")+'">'+r.otsu.bad+'</td>'
+        + '<td>'+r.otsu.opp+'</td>'
+        + '<td>'+r.otsu.longest_bad+'</td>'
+        + '<td>'+Math.round(r.otsu.duty*100)+'%</td>'
+        + '<td class="'+(c===best?"win":"")+'">'+c+'</td>'
+        + '<td>'+coc+'</td>'
+        + '<td style="color:var(--faint)">'+(rec||"–")+'</td></tr>';
+    });
+    host.innerHTML = h + '</tbody>';
+  }
+
+  function drawVerdict(){
+    var g = D.reference.grid, cbad=cfg.cbad;
+    function cost(x){ return cbad*x.bad + x.opp; }
+    function cell(ag,nm){ return g.filter(function(r){return r.agg===ag&&r.norm===nm;})[0]; }
+    var v3=D.reference.v3;
+    var mIdOt = cell("mean","identity").otsu, mIdCo = cell("mean","identity").cost_opt;
+    var mEc = cell("mean","ecdf").otsu;
+    // spread of cost-opt cost across normalizations for the mean aggregation
+    var coCosts = g.filter(function(r){return r.agg==="mean";}).map(function(r){return cost(r.cost_opt);});
+    var coLo=Math.min.apply(null,coCosts), coHi=Math.max.apply(null,coCosts);
+    document.getElementById("verdict").innerHTML =
+      "<p><b>Where you draw the line matters far more than how the scores are reshaped.</b> "
+      + "Nothing but the rule separates these two runs on the raw mean scores: the v3 default "
+      + "(Otsu's automatic valley) drops <b>"+mIdOt.bad+"</b> of 73 real-motion frames — an unbroken "
+      + "<b>"+mIdOt.longest_bad+"-frame</b> miss covering the whole E3 hatchback transit — for a cost of "
+      + "<b>"+cost(mIdOt)+"</b>. The best possible line placement (found by trying every cut against the "
+      + "hand labels) drops <b>"+mIdCo.bad+"</b> for a cost of <b>"+cost(mIdCo)+"</b>: a "
+      + "<b>"+(cost(mIdOt)/Math.max(cost(mIdCo),1)).toFixed(0)+"&times;</b> difference from the rule alone.</p>"
+      + "<p><b>Reshaping still rescues a fixed rule:</b> replace every score by its rank (ECDF) and "
+      + "Otsu's valley-seek becomes a near-median split that lands on the true boundary — dropped frames "
+      + "fall from <b>"+mIdOt.bad+"</b> to <b>"+mEc.bad+"</b> and cost from <b>"+cost(mIdOt)+"</b> to "
+      + "<b>"+cost(mEc)+"</b>, label-free. The rescaling ceiling: once the rule is cost-aware, cost-opt "
+      + "lands at cost "+coLo+"&ndash;"+coHi+" across every reshaping (it is invariant to any reordering "
+      + "by construction), so reshaping cannot beat it.</p>"
+      + "<p><b>How a frame's score is computed (aggregation) is second-order:</b> mean, max and top-4 "
+      + "span roughly 2&times; in best-possible cost, where the rule spans ~15&times;. With these labels "
+      + "the <b>frame average (mean)</b> is best — its quiet-frame baseline is tightest, so fewer "
+      + "still frames get falsely kept at full speed at a low cut.</p>"
+      + "<p><b>One event is a sensing limit, not a tuning failure.</b> The E4 approaching headlights "
+      + "move so few pixels through the fog that their score sits at the noise level: raw scores only "
+      + "catch E4 at a near-zero cut (flooding the page with wasted full-speed frames), while ECDF lifts "
+      + "the frames to about the 85th percentile so plain Otsu flags all four events while dropping "
+      + "only "+mEc.bad+" frames.</p>"
+      + "<p><b>If you deploy one recipe</b> without per-clip tuning: <code>ECDF + Otsu</code> — or "
+      + "<code>quantile(q≈0.5)</code> on the frame average. Neither looks at the hand labels, and both "
+      + "land within a few cost points of the tuned optimum on this clip.</p>";
+  }
+
+  // =======================================================================
+  //  PANEL 5 — throttle simulation
+  // =======================================================================
+  function drawSim(){
+    var pr = CUR.pred, sb = document.getElementById("sim-bar"), g="";
+    for (var n=0;n<VIDX.length;n++){
+      var f=VIDX[n], full=pr[f];
+      g += '<rect x="'+(f/F*100).toFixed(3)+'" y="0" width="'+(1.02/F*100).toFixed(3)
+        + '" height="1" fill="'+(full?COL.nvof:COL["ok-st"])+'" fill-opacity="'+(full?"0.85":"0.55")+'"/>';
+      if (LAB[f]===1 && !full)
+        g += '<rect x="'+(f/F*100).toFixed(3)+'" y="0" width="'+(1.02/F*100).toFixed(3)+'" height="1" fill="'+COL.bad+'"/>';
+    }
+    sb.innerHTML = g;
+    var m = scorePred(pr, cfg.cbad, cfg.copp);
+    var full8 = NVAL*(1-m.duty), thr = NVAL*m.duty;
+    var framesNoThrottle = NVAL;
+    var framesThrottled = full8 + thr*(cfg.lowfps/FPS);
+    var saved = (1 - framesThrottled/framesNoThrottle)*100;
+    document.getElementById("sim-lowfps").textContent = cfg.lowfps;
+    document.getElementById("sim-meta").innerHTML =
+      "throttled <b>" + (m.duty*100).toFixed(0) + "%</b> of the clip"
+      + " &nbsp;·&nbsp; <b>" + m.segments + "</b> separate still stretches"
+      + " &nbsp;·&nbsp; decode/inference budget saved ≈ <b>" + saved.toFixed(0) + "%</b>"
+      + " &nbsp;·&nbsp; motion frames slept through: <b style='color:var(--bad)'>" + m.bad + "</b>";
+  }
+  document.querySelectorAll('.ctl [data-lf]').forEach(function(b){
+    b.addEventListener("click", function(){
+      cfg.lowfps = +b.getAttribute("data-lf");
+      setPressed_generic(b);
+      drawSim();
+    });
+  });
+
+  // =======================================================================
+  //  wiring
+  // =======================================================================
+  function setPressed(sel, btn){
+    document.querySelectorAll(sel+" button").forEach(function(b){
+      b.setAttribute("aria-pressed", b===btn ? "true":"false");
+    });
+  }
+  function setPressed_generic(btn){
+    btn.parentNode.querySelectorAll("button").forEach(function(b){
+      b.setAttribute("aria-pressed", b===btn ? "true":"false");
+    });
+  }
+
+  // norm chips (panel 3)
+  (function(){
+    var host = document.getElementById("norm-ctl");
+    D.norms.forEach(function(nm, i){
+      var b=document.createElement("button");
+      b.setAttribute("data-norm", nm);
+      b.setAttribute("aria-pressed", nm==="identity" ? "true":"false");
+      b.textContent = NORM_META[nm].label;
+      b.addEventListener("click", function(){
+        cfg.norm = nm; setPressed("#norm-ctl", b); renderAll();
+      });
+      host.appendChild(b);
+    });
+  })();
+  document.querySelectorAll("#agg-ctl-3 button").forEach(function(b){
+    b.addEventListener("click", function(){
+      cfg.agg = b.getAttribute("data-agg"); setPressed("#agg-ctl-3", b); renderAll();
+    });
+  });
+  // plain-language rows for the five threshold rules; .current tracks the selection
+  function drawRuleHelp(){
+    var R = [
+      ["otsu", "Otsu's automatic line",
+       "Finds the deepest valley in the score histogram and cuts there — no settings, no labels. "
+       + "On raw scores its valley sits inside the noise; after rank (ECDF) reshaping it lands on the "
+       + "real still/motion boundary."],
+      ["quantile", "Percentile rule",
+       "Calls the busiest share q of frames MOTION, the rest STATIC. One slider, no labels, stable "
+       + "across clips — drag q right to demand more movement before a frame is called MOTION."],
+      ["fixedraw", "Fixed physical cut",
+       "One fixed height in real units: more than X pixels of flow means MOTION. The rule a live "
+       + "pipeline could ship unchanged — it reads the raw scores directly, so reshaping does not "
+       + "affect it."],
+      ["costopt", "Best possible line (uses the labels)",
+       "Tries every possible cut and keeps the cheapest at your error weighting. Because it reads "
+       + "the hand labels it is a ceiling on what any automatic rule could achieve — a benchmark, "
+       + "not a deployable rule."],
+      ["hysteresis", "Thermostat (hysteresis)",
+       "Not a line but a state machine: full speed the instant the score passes T_hi; throttle only "
+       + "after d calm frames in a row — so the framerate never flaps around a single cut height."]
+    ];
+    var host = document.getElementById("rule-help"); host.innerHTML = "";
+    R.forEach(function(r){
+      var d = document.createElement("div");
+      d.className = "rh" + (r[0]===cfg.rule ? " current" : "");
+      d.innerHTML = "<b>" + r[1] + "</b><span>" + r[2] + "</span>";
+      host.appendChild(d);
+    });
+  }
+
+  document.querySelectorAll("#rule-ctl button").forEach(function(b){
+    b.addEventListener("click", function(){
+      cfg.rule = b.getAttribute("data-rule"); setPressed("#rule-ctl", b);
+      syncSliders(); renderAll();
+    });
+  });
+  function bindSlider(id, key, fmt, after){
+    var el=document.getElementById(id), out=document.getElementById(id+"-val");
+    el.addEventListener("input", function(){
+      cfg[key] = +el.value;
+      if (out) out.textContent = fmt ? fmt(cfg[key]) : cfg[key];
+      if (after) after();
+      renderAll();
+    });
+  }
+  bindSlider("q","q",function(v){return v.toFixed(2);});
+  document.getElementById("raw").addEventListener("input", function(){
+    cfg.rawFrac = +this.value/100; renderAll();
+  });
+  bindSlider("thi","thi",function(v){return v.toFixed(2);});
+  bindSlider("tlo","tlo",function(v){return v.toFixed(2);});
+  bindSlider("dmin","dmin",function(v){return v;});
+
+  function syncSliders(){
+    document.getElementById("sl-q").hidden = cfg.rule!=="quantile";
+    document.getElementById("sl-raw").hidden = cfg.rule!=="fixedraw";
+    var hy = cfg.rule!=="hysteresis";
+    document.getElementById("sl-thi").hidden = hy;
+    document.getElementById("sl-tlo").hidden = hy;
+    document.getElementById("sl-dmin").hidden = hy;
+  }
+
+  function renderAll(){
+    CUR = currentThreshold();
+    // raw slider live label needs native range
+    if (cfg.rule==="fixedraw"){
+      var nv = VIDX.map(function(f){return CUR.native[f];}).sort(function(a,b){return a-b;});
+      var lo=pctl(nv,0.02), hi=pctl(nv,0.98);
+      document.getElementById("raw-val").textContent = (lo+cfg.rawFrac*(hi-lo)).toFixed(2)+" px";
+    }
+    curFrame = -2;               // force plot playline refresh
+    layoutPlots();
+    drawRuleHelp();
+    drawChips();
+    drawSmallMultiples(); drawNormMethods();
+    drawCostCurve(); drawEvalTable(); drawVerdict();
+    drawSim();
+    render(Math.max(0, curFrame<0 ? 0 : curFrame));
+  }
+
+  // ---- footer ----
+  document.getElementById("footer").innerHTML =
+    "source " + V.source_note
+    + "<br>study data: <code style='font-family:inherit'>runs/nvof-study/study_data.json</code> · "
+    + "generated " + (D.generated||"") + " · every number on this page is recomputed in your "
+    + "browser from that JSON — change a slider and each panel re-derives live, mirrored by "
+    + "<code style='font-family:inherit'>src/build_study_data.py</code>"
+    + "<br>NvOF grid " + GW + "×" + GH + " pooled cells (p99-clipped) · frame-mean series is the "
+    + "full-res 320×180 block map ÷ diagonal, identical to report v3";
+
+  syncSliders();
+  renderAll();
+})();
+</script>

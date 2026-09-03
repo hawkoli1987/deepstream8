@@ -25,6 +25,16 @@ pedestrian and passing cars against long still stretches), built with
 after running the pipeline with `--roi full`; see `runs/street/` (local) for the clip and run data,
 `data/src/` for the original downloads.
 
+**`nvof-stillness-study.html`** — a focused study (not the five-lane instrument): the **NvOF lane
+only** on the v3 street clip, comparing seven **score normalizations** × five **threshold rules**
+for detecting truly-static segments to throttle framerate during them, under an asymmetric cost
+(a motion frame labelled STATIC is BAD; a static frame labelled MOTION is cheap). 167 frames
+hand-labelled from contact sheets. Interactive tuning bench + live cost evaluation. Built with
+`python3 src/build_study_data.py` (stdlib only, → `runs/nvof-study/study_data.json`) then
+`python3 src/build_html.py templates/nvof-study.html runs/street/clip/clip3.mp4 runs/nvof-study/study_data.json nvof-stillness-study.html`.
+Headline: the threshold **rule** swings cost ~15×, the normalization far less — but ECDF (rank)
+normalization makes the naive Otsu rule near-optimal here (BAD 3 vs 54) with no labels.
+
 ## The five algorithms
 
 | id | what | device |
@@ -82,8 +92,11 @@ motion-compare-v1.html
 
 ## Files
 
-- `motion-compare-v1.html`, `motion-compare-v2.html` — the deliverables (self-contained)
-- `templates/` — the pages without inlined assets (`__VIDEO__`, `__DATA__`); `cam6.html` = v1, `carpark.html` = v2
+- `motion-compare-v{1,2,3}.html`, `nvof-stillness-study.html` — the deliverables (self-contained)
+- `templates/` — the pages without inlined assets (`__VIDEO__`, `__DATA__`); `cam6.html` = v1,
+  `carpark.html` = v2, `street.html` = v3, `nvof-study.html` = the stillness study
+- `src/build_study_data.py` — stdlib-only; fuses the NvOF lane + hand labels → `runs/nvof-study/study_data.json`
+- `src/contact_sheet.swift` — numbered frame grids for hand-labelling (`runs/nvof-study/qa/`)
 - `runs/<clip>/` — per-run data, gitignored, one dir per clip:
   `clip/` (prepared mp4) · `scores/` (`motion_scores.json`) · `perf/` (bench + SM-sampling provenance) ·
   `qa/` (verification frames) · `sheets/` (candidate contact sheets, v2)
