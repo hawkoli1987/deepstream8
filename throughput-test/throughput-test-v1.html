@@ -164,7 +164,7 @@ const okPoints = DATA.points.filter(p => p.status === "ok");
 const m = DATA.meta || {};
 document.getElementById("meta-line").textContent =
   `${m.gpu || "?"} · driver ${m.driver || "?"} · DeepStream ${m.ds || "?"} · tag ${m.tag || "?"}` +
-  (m.generated_at ? ` · ${new Date(m.generated_at * 1000).toISOString()}` : "");
+  (m.generated_at ? ` · ${new Date(typeof m.generated_at === "number" ? m.generated_at * 1e3 : Date.parse(m.generated_at)).toISOString().slice(0, 16)}Z` : "");
 
 const lastOk = okPoints[okPoints.length - 1];
 const best = okPoints.reduce((a, b) => (b.N > (a?.N ?? -1) ? b : a), null);
@@ -252,7 +252,12 @@ function lineChart(chart, points, seriesNames, colorIdx) {
 }
 
 const chartsHost = document.getElementById("charts");
-const runs = (m.runs && m.runs.length > 1) ? m.runs : null;
+// series = multiple sweep runs overlaid; derive from the points themselves.
+// (meta.runs is the per-point dir list, NOT run names — never feed it here.)
+const runs = (() => {
+  const names = [...new Set(okPoints.map(p => p.run).filter(Boolean))];
+  return names.length > 1 ? names : null;
+})();
 CHARTS.forEach((chart, ci) => {
   const card = document.createElement("div");
   card.className = "card";
